@@ -34,6 +34,10 @@ for gt in "$CONDA_PREFIX"/bin/gtests/{libcudf,libcudf_kafka}/* ; do
         gtest_filter="SpanTest.CanConstructFromDeviceContainers"
         GTEST_CUDF_STREAM_MODE="new_cudf_default" LD_PRELOAD=${STREAM_IDENTIFY_LIB_MODE_CUDF} ${gt} --gtest_output=xml:${RAPIDS_TESTS_DIR} --gtest_filter="-${gtest_filter}" && \
             ${gt} --gtest_output=xml:${RAPIDS_TESTS_DIR} --gtest_filter="${gtest_filter}"
+    elif [[ ${test_name} == "HASHING_TEST" ]]; then
+        gtest_filter="HashTest.MultiValue"
+        GTEST_CUDF_STREAM_MODE="new_cudf_default" LD_PRELOAD=${STREAM_IDENTIFY_LIB_MODE_CUDF} ${gt} --gtest_output=xml:${RAPIDS_TESTS_DIR} --gtest_filter="-${gtest_filter}"
+        GTEST_CUDF_STREAM_MODE="new_testing_default" LD_PRELOAD=${STREAM_IDENTIFY_LIB_MODE_TESTING} ${gt} --gtest_output=xml:${RAPIDS_TESTS_DIR} --gtest_filter="${gtest_filter}"
     else
         GTEST_CUDF_STREAM_MODE="new_cudf_default" LD_PRELOAD=${STREAM_IDENTIFY_LIB_MODE_CUDF} ${gt} --gtest_output=xml:${RAPIDS_TESTS_DIR}
     fi
