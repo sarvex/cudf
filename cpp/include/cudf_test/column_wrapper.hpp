@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019-2022, NVIDIA CORPORATION.
+ * Copyright (c) 2019-2023, NVIDIA CORPORATION.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -34,6 +34,7 @@
 
 #include <cudf_test/column_utilities.hpp>
 #include <cudf_test/cudf_gtest.hpp>
+#include <cudf_test/default_stream.hpp>
 
 #include <rmm/device_buffer.hpp>
 
@@ -170,7 +171,8 @@ rmm::device_buffer make_elements(InputIterator begin, InputIterator end)
   auto transform_begin = thrust::make_transform_iterator(begin, transformer);
   auto const size      = cudf::distance(begin, end);
   auto const elements  = thrust::host_vector<ElementTo>(transform_begin, transform_begin + size);
-  return rmm::device_buffer{elements.data(), size * sizeof(ElementTo), cudf::get_default_stream()};
+  return rmm::device_buffer{
+    elements.data(), size * sizeof(ElementTo), cudf::test::get_default_stream()};
 }
 
 /**
@@ -196,7 +198,8 @@ rmm::device_buffer make_elements(InputIterator begin, InputIterator end)
   auto transform_begin = thrust::make_transform_iterator(begin, transformer);
   auto const size      = cudf::distance(begin, end);
   auto const elements  = thrust::host_vector<RepType>(transform_begin, transform_begin + size);
-  return rmm::device_buffer{elements.data(), size * sizeof(RepType), cudf::get_default_stream()};
+  return rmm::device_buffer{
+    elements.data(), size * sizeof(RepType), cudf::test::get_default_stream()};
 }
 
 /**
@@ -223,7 +226,8 @@ rmm::device_buffer make_elements(InputIterator begin, InputIterator end)
   auto transformer_begin = thrust::make_transform_iterator(begin, to_rep);
   auto const size        = cudf::distance(begin, end);
   auto const elements = thrust::host_vector<RepType>(transformer_begin, transformer_begin + size);
-  return rmm::device_buffer{elements.data(), size * sizeof(RepType), cudf::get_default_stream()};
+  return rmm::device_buffer{
+    elements.data(), size * sizeof(RepType), cudf::test::get_default_stream()};
 }
 
 /**
@@ -271,7 +275,7 @@ rmm::device_buffer make_null_mask(ValidityIterator begin, ValidityIterator end)
   auto null_mask = make_null_mask_vector(begin, end);
   return rmm::device_buffer{null_mask.data(),
                             null_mask.size() * sizeof(decltype(null_mask.front())),
-                            cudf::get_default_stream()};
+                            cudf::test::get_default_stream()};
 }
 
 /**
@@ -547,7 +551,7 @@ class fixed_point_column_wrapper : public detail::column_wrapper {
     wrapped.reset(new cudf::column{
       data_type,
       size,
-      rmm::device_buffer{elements.data(), size * sizeof(Rep), cudf::get_default_stream()}});
+      rmm::device_buffer{elements.data(), size * sizeof(Rep), cudf::test::get_default_stream()}});
   }
 
   /**
@@ -611,7 +615,7 @@ class fixed_point_column_wrapper : public detail::column_wrapper {
     wrapped.reset(new cudf::column{
       data_type,
       size,
-      rmm::device_buffer{elements.data(), size * sizeof(Rep), cudf::get_default_stream()},
+      rmm::device_buffer{elements.data(), size * sizeof(Rep), cudf::test::get_default_stream()},
       detail::make_null_mask(v, v + size),
       cudf::UNKNOWN_NULL_COUNT});
   }
@@ -732,9 +736,11 @@ class strings_column_wrapper : public detail::column_wrapper {
   {
     auto all_valid        = thrust::make_constant_iterator(true);
     auto [chars, offsets] = detail::make_chars_and_offsets(begin, end, all_valid);
-    auto d_chars   = cudf::detail::make_device_uvector_sync(chars, cudf::get_default_stream());
-    auto d_offsets = cudf::detail::make_device_uvector_sync(offsets, cudf::get_default_stream());
-    wrapped        = cudf::make_strings_column(d_chars, d_offsets);
+    auto d_chars = cudf::detail::make_device_uvector_sync(chars, cudf::test::get_default_stream());
+    auto d_offsets =
+      cudf::detail::make_device_uvector_sync(offsets, cudf::test::get_default_stream());
+    wrapped = cudf::make_strings_column(
+      d_chars, d_offsets, {}, cudf::UNKNOWN_NULL_COUNT, cudf::test::get_default_stream());
   }
 
   /**
@@ -772,10 +778,12 @@ class strings_column_wrapper : public detail::column_wrapper {
     size_type num_strings = std::distance(begin, end);
     auto [chars, offsets] = detail::make_chars_and_offsets(begin, end, v);
     auto null_mask        = detail::make_null_mask_vector(v, v + num_strings);
-    auto d_chars   = cudf::detail::make_device_uvector_sync(chars, cudf::get_default_stream());
-    auto d_offsets = cudf::detail::make_device_uvector_sync(offsets, cudf::get_default_stream());
-    auto d_bitmask = cudf::detail::make_device_uvector_sync(null_mask, cudf::get_default_stream());
-    wrapped        = cudf::make_strings_column(d_chars, d_offsets, d_bitmask);
+    auto d_chars = cudf::detail::make_device_uvector_sync(chars, cudf::test::get_default_stream());
+    auto d_offsets =
+      cudf::detail::make_device_uvector_sync(offsets, cudf::test::get_default_stream());
+    auto d_bitmask =
+      cudf::detail::make_device_uvector_sync(null_mask, cudf::test::get_default_stream());
+    wrapped = cudf::make_strings_column(d_chars, d_offsets, d_bitmask);
   }
 
   /**
