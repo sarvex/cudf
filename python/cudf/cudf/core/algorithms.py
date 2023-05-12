@@ -103,12 +103,7 @@ def factorize(
             else Scalar(None, dtype=values.dtype)
         )
     else:
-        if na_sentinel is None:
-            msg = (
-                "Specifying `na_sentinel=None` is deprecated, specify "
-                "`use_na_sentinel=False` instead."
-            )
-        elif na_sentinel == -1:
+        if na_sentinel == -1:
             msg = (
                 "Specifying `na_sentinel=-1` is deprecated, specify "
                 "`use_na_sentinel=True` instead."
@@ -166,7 +161,7 @@ def _index_or_values_interpolation(column, index=None):
 
     # trivial cases, all nan or no nans
     num_nan = mask.sum()
-    if num_nan == 0 or num_nan == len(column):
+    if num_nan in [0, len(column)]:
         return column
 
     to_interp = IndexedFrame(data={None: column}, index=index)
@@ -184,11 +179,11 @@ def _index_or_values_interpolation(column, index=None):
 
 
 def get_column_interpolator(method):
-    interpolator = {
+    if interpolator := {
         "linear": _linear_interpolation,
         "index": _index_or_values_interpolation,
         "values": _index_or_values_interpolation,
-    }.get(method, None)
-    if not interpolator:
+    }.get(method, None):
+        return interpolator
+    else:
         raise ValueError(f"Interpolation method `{method}` not found")
-    return interpolator

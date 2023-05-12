@@ -266,11 +266,7 @@ class BaseIndex(Serializable):
         return 1
 
     def _set_names(self, names, inplace=False):
-        if inplace:
-            idx = self
-        else:
-            idx = self.copy(deep=False)
-
+        idx = self if inplace else self.copy(deep=False)
         idx.names = names
         if not inplace:
             return idx
@@ -515,14 +511,8 @@ class BaseIndex(Serializable):
             else:
                 return cudf.Index([], name=res_name)
 
-        if self.has_duplicates:
-            lhs = self.unique()
-        else:
-            lhs = self
-        if other.has_duplicates:
-            rhs = other.unique()
-        else:
-            rhs = other
+        lhs = self.unique() if self.has_duplicates else self
+        rhs = other.unique() if other.has_duplicates else other
         result = lhs._intersection(rhs, sort=sort)
         result.name = res_name
         return result
@@ -534,9 +524,7 @@ class BaseIndex(Serializable):
         case make a shallow copy of self.
         """
         name = _get_result_name(self.name, other.name)
-        if self.name != name:
-            return self.rename(name)
-        return self
+        return self.rename(name) if self.name != name else self
 
     def fillna(self, value, downcast=None):
         """
@@ -832,10 +820,7 @@ class BaseIndex(Serializable):
             if self.dtype != other.dtype:
                 difference = difference.astype(self.dtype)
 
-        if sort is None and len(other):
-            return difference.sort_values()
-
-        return difference
+        return difference.sort_values() if sort is None and len(other) else difference
 
     def is_numeric(self):
         """
@@ -1294,10 +1279,7 @@ class BaseIndex(Serializable):
         indices = self.argsort(ascending=ascending, na_position=na_position)
         index_sorted = self.take(indices)
 
-        if return_indexer:
-            return index_sorted, indices
-        else:
-            return index_sorted
+        return (index_sorted, indices) if return_indexer else index_sorted
 
     def join(
         self, other, how="left", level=None, return_indexers=False, sort=False
@@ -1475,11 +1457,7 @@ class BaseIndex(Serializable):
         if hasattr(cudf_index_module, fname):
             cudf_func = getattr(cudf_index_module, fname)
             # Handle case if cudf_func is same as numpy function
-            if cudf_func is func:
-                return NotImplemented
-            else:
-                return cudf_func(*args, **kwargs)
-
+            return NotImplemented if cudf_func is func else cudf_func(*args, **kwargs)
         else:
             return NotImplemented
 
@@ -1757,7 +1735,4 @@ class BaseIndex(Serializable):
 
 
 def _get_result_name(left_name, right_name):
-    if left_name == right_name:
-        return left_name
-    else:
-        return None
+    return left_name if left_name == right_name else None

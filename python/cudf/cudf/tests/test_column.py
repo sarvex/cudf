@@ -98,11 +98,7 @@ def test_column_offset_and_size(pandas_input, offset, size):
 
     if offset is None:
         offset = 0
-    if size is None:
-        size = 100
-    else:
-        size = size + offset
-
+    size = 100 if size is None else size + offset
     slicer = slice(offset, size)
     expect = pandas_input.iloc[slicer].reset_index(drop=True)
 

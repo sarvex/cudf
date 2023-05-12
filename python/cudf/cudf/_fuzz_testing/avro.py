@@ -95,7 +95,7 @@ class AvroReader(IOFuzz):
 
     def write_data(self, file_name):
         if self._current_buffer is not None:
-            with open(file_name + "_crash.avro", "wb") as crash_dataset:
+            with open(f"{file_name}_crash.avro", "wb") as crash_dataset:
                 crash_dataset.write(self._current_buffer)
 
     def set_rand_params(self, params):

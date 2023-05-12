@@ -390,8 +390,10 @@ class Merge:
         # If nothing specified, must have common cols to use implicitly
         same_named_columns = set(lhs._data) & set(rhs._data)
         if (
-            not (left_index or right_index)
-            and not (left_on or right_on)
+            not left_index
+            and not right_index
+            and not left_on
+            and not right_on
             and len(same_named_columns) == 0
         ):
             raise ValueError("No common columns to perform merge on")
@@ -405,12 +407,11 @@ class Merge:
                     left_on.index(name) == right_on.index(name)
                 ):
                     continue
-            else:
-                if not (lsuffix or rsuffix):
-                    raise ValueError(
-                        "there are overlapping columns but "
-                        "lsuffix and rsuffix are not defined"
-                    )
+            elif not lsuffix and not rsuffix:
+                raise ValueError(
+                    "there are overlapping columns but "
+                    "lsuffix and rsuffix are not defined"
+                )
 
         if (
             isinstance(lhs, cudf.DataFrame)

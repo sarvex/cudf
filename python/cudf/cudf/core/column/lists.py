@@ -177,9 +177,7 @@ class ListColumn(ColumnBase):
         )
 
     def normalize_binop_value(self, other):
-        if not isinstance(other, ListColumn):
-            return NotImplemented
-        return other
+        return NotImplemented if not isinstance(other, ListColumn) else other
 
     def _with_type_metadata(
         self: "cudf.core.column.ListColumn", dtype: Dtype
@@ -225,17 +223,14 @@ class ListColumn(ColumnBase):
         for data in arbitrary:
             if cudf._lib.scalar._is_null_host_scalar(data):
                 mask_col.append(False)
-                offset_col.append(offset)
             else:
                 mask_col.append(True)
                 data_col = data_col.append(as_column(data))
                 offset += len(data)
-                offset_col.append(offset)
-
+            offset_col.append(offset)
         offset_col = column.as_column(offset_col, dtype=size_type_dtype)
 
-        # Build ListColumn
-        res = cls(
+        return cls(
             size=len(arbitrary),
             dtype=cudf.ListDtype(data_col.dtype),
             mask=cudf._lib.transform.bools_to_mask(as_column(mask_col)),
@@ -243,7 +238,6 @@ class ListColumn(ColumnBase):
             null_count=0,
             children=(offset_col, data_col),
         )
-        return res
 
     def as_string_column(
         self, dtype: Dtype, format=None, **kwargs
@@ -365,7 +359,7 @@ class ListMethods(ColumnMethods):
             index = as_column(index)
             out = extract_element_column(self._column, as_column(index))
 
-        if not (default is None or default is NA):
+        if default is not None and default is not NA:
             # determine rows for which `index` is out-of-bounds
             lengths = count_elements(self._column)
             out_of_bounds_mask = (np.negative(index) > lengths) | (
@@ -545,7 +539,7 @@ class ListMethods(ColumnMethods):
         lists_indices_col = as_column(lists_indices)
         if not isinstance(lists_indices_col, ListColumn):
             raise ValueError("lists_indices should be list type array.")
-        if not lists_indices_col.size == self._column.size:
+        if lists_indices_col.size != self._column.size:
             raise ValueError(
                 "lists_indices and list column is of different " "size."
             )

@@ -95,7 +95,7 @@ class OrcReader(IOFuzz):
 
     def write_data(self, file_name):
         if self._current_buffer is not None:
-            with open(file_name + "_crash.orc", "wb") as crash_dataset:
+            with open(f"{file_name}_crash.orc", "wb") as crash_dataset:
                 crash_dataset.write(self._current_buffer)
 
     def set_rand_params(self, params):
@@ -110,7 +110,7 @@ class OrcReader(IOFuzz):
                 elif param == "stripes":
                     f = io.BytesIO(self._current_buffer)
                     reader = pyorc.Reader(f)
-                    stripes = [i for i in range(reader.num_of_stripes)]
+                    stripes = list(range(reader.num_of_stripes))
                     params_dict[param] = np.random.choice(
                         [
                             None,
@@ -132,10 +132,10 @@ class OrcReader(IOFuzz):
                     params_dict[param] = np.random.choice(
                         [None, self._rand(len(self._df))]
                     )
-            else:
-                if not isinstance(values, list):
-                    raise TypeError("values must be of type list")
+            elif isinstance(values, list):
                 params_dict[param] = np.random.choice(values)
+            else:
+                raise TypeError("values must be of type list")
         self._current_params["test_kwargs"] = self.process_kwargs(params_dict)
 
 
@@ -206,4 +206,4 @@ class OrcWriter(IOFuzz):
         # Due to the lack of really fast reference writer we are dumping
         # the dataframe to a parquet file
         if self._df is not None:
-            self._df.to_parquet(file_name + "_crash.parquet")
+            self._df.to_parquet(f"{file_name}_crash.parquet")

@@ -63,7 +63,7 @@ def read_json(
             "keep_quotes='True' is supported only with engine='cudf'"
         )
 
-    if engine == "cudf_legacy" or engine == "cudf":
+    if engine in ["cudf_legacy", "cudf"]:
         if dtype is None:
             dtype = True
 
@@ -164,15 +164,12 @@ def read_json(
             for name in df._column_names
             if name not in dtype
         }
-        default_dtypes = {}
-
-        for name, dt in unspecified_dtypes.items():
-            if dt == np.dtype("i1"):
-                # csv reader reads all null column as int8.
-                # The dtype should remain int8.
-                default_dtypes[name] = dt
-            else:
-                default_dtypes[name] = _maybe_convert_to_default_type(dt)
+        default_dtypes = {
+            name: dt
+            if dt == np.dtype("i1")
+            else _maybe_convert_to_default_type(dt)
+            for name, dt in unspecified_dtypes.items()
+        }
         df = df.astype(default_dtypes)
 
     return df

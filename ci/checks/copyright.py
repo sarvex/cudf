@@ -53,10 +53,7 @@ def checkThisFile(f):
     for exempt in ExemptFiles:
         if exempt.search(f):
             return False
-    for checker in FilesToCheck:
-        if checker.search(f):
-            return True
-    return False
+    return any(checker.search(f) for checker in FilesToCheck)
 
 
 def modifiedFiles():
@@ -81,17 +78,11 @@ def modifiedFiles():
         # returns None if no tracking branch is set.
         upstream_target_branch = repo.heads[target_branch].tracking_branch()
     if upstream_target_branch is None:
-        # Fall back to the remote with the newest target_branch. This code
-        # path is used on CI because the only local branch reference is
-        # current-pr-branch, and thus target_branch is not in repo.heads.
-        # This also happens if no tracking branch is defined for the local
-        # target_branch. We use the remote with the latest commit if
-        # multiple remotes are defined.
-        candidate_branches = [
-            remote.refs[target_branch] for remote in repo.remotes
+        if candidate_branches := [
+            remote.refs[target_branch]
+            for remote in repo.remotes
             if target_branch in remote.refs
-        ]
-        if len(candidate_branches) > 0:
+        ]:
             upstream_target_branch = sorted(
                 candidate_branches,
                 key=lambda branch: branch.commit.committed_datetime,
@@ -103,16 +94,13 @@ def modifiedFiles():
             upstream_target_branch = repo.heads[target_branch]
     merge_base = repo.merge_base("HEAD", upstream_target_branch.commit)[0]
     diff = merge_base.diff()
-    changed_files = {f for f in diff if f.b_path is not None}
-    return changed_files
+    return {f for f in diff if f.b_path is not None}
 
 
 def getCopyrightYears(line):
-    res = CheckSimple.search(line)
-    if res:
+    if res := CheckSimple.search(line):
         return int(res.group(1)), int(res.group(1))
-    res = CheckDouble.search(line)
-    if res:
+    if res := CheckDouble.search(line):
         return int(res.group(1)), int(res.group(2))
     return None, None
 
@@ -140,7 +128,7 @@ def checkCopyright(f, update_current_year):
         lines = f.b_blob.data_stream.read().decode().splitlines(keepends=True)
     else:
         path = f
-        with open(f, encoding="utf-8") as fp:
+        with open(path, encoding="utf-8") as fp:
             lines = fp.readlines()
 
     for line in lines:
@@ -187,8 +175,7 @@ def checkCopyright(f, update_current_year):
         errs = []
 
     if update_current_year:
-        errs_update = [x for x in errs if x[-1] is not None]
-        if len(errs_update) > 0:
+        if errs_update := [x for x in errs if x[-1] is not None]:
             lines_changed = ", ".join(str(x[1]) for x in errs_update)
             print(f"File: {path}. Changing line(s) {lines_changed}")
             for _, lineNum, __, replacement in errs_update:

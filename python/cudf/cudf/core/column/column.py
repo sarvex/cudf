@@ -141,18 +141,17 @@ class ColumnBase(Column, Serializable, BinaryOperand, Reducible):
         -------
         numba.cuda.cudadrv.devicearray.DeviceNDArray
         """
-        if self.data is not None:
-            if mode == "read":
-                obj = _proxy_cai_obj(
-                    self.data._get_cuda_array_interface(readonly=True),
-                    owner=self.data,
-                )
-            elif mode == "write":
-                obj = self.data
-            else:
-                raise ValueError(f"Unsupported mode: {mode}")
-        else:
+        if self.data is None:
             obj = None
+        elif mode == "read":
+            obj = _proxy_cai_obj(
+                self.data._get_cuda_array_interface(readonly=True),
+                owner=self.data,
+            )
+        elif mode == "write":
+            obj = self.data
+        else:
+            raise ValueError(f"Unsupported mode: {mode}")
         return cuda.as_cuda_array(obj).view(self.dtype)
 
     def mask_array_view(
@@ -177,18 +176,17 @@ class ColumnBase(Column, Serializable, BinaryOperand, Reducible):
         -------
         numba.cuda.cudadrv.devicearray.DeviceNDArray
         """
-        if self.mask is not None:
-            if mode == "read":
-                obj = _proxy_cai_obj(
-                    self.mask._get_cuda_array_interface(readonly=True),
-                    owner=self.mask,
-                )
-            elif mode == "write":
-                obj = self.mask
-            else:
-                raise ValueError(f"Unsupported mode: {mode}")
-        else:
+        if self.mask is None:
             obj = None
+        elif mode == "read":
+            obj = _proxy_cai_obj(
+                self.mask._get_cuda_array_interface(readonly=True),
+                owner=self.mask,
+            )
+        elif mode == "write":
+            obj = self.mask
+        else:
+            raise ValueError(f"Unsupported mode: {mode}")
         return cuda.as_cuda_array(obj).view(mask_dtype)
 
     def __len__(self) -> int:
@@ -514,24 +512,23 @@ class ColumnBase(Column, Serializable, BinaryOperand, Reducible):
                 offset=self.offset,
             )
 
-        else:
-            if self.null_count > 0:
-                raise ValueError(
-                    "Can not produce a view of a column with nulls"
-                )
+        if self.null_count > 0:
+            raise ValueError(
+                "Can not produce a view of a column with nulls"
+            )
 
-            if (self.size * self.dtype.itemsize) % dtype.itemsize:
-                raise ValueError(
-                    f"Can not divide {self.size * self.dtype.itemsize}"
-                    + f" total bytes into {dtype} with size {dtype.itemsize}"
-                )
+        if (self.size * self.dtype.itemsize) % dtype.itemsize:
+            raise ValueError(
+                f"Can not divide {self.size * self.dtype.itemsize}"
+                + f" total bytes into {dtype} with size {dtype.itemsize}"
+            )
 
-            # This assertion prevents mypy errors below.
-            assert self.base_data is not None
+        # This assertion prevents mypy errors below.
+        assert self.base_data is not None
 
-            start = self.offset * self.dtype.itemsize
-            end = start + self.size * self.dtype.itemsize
-            return build_column(self.base_data[start:end], dtype=dtype)
+        start = self.offset * self.dtype.itemsize
+        end = start + self.size * self.dtype.itemsize
+        return build_column(self.base_data[start:end], dtype=dtype)
 
     def element_indexing(self, index: int):
         """Default implementation for indexing to an element
@@ -551,25 +548,23 @@ class ColumnBase(Column, Serializable, BinaryOperand, Reducible):
     def slice(self, start: int, stop: int, stride: int = None) -> ColumnBase:
         stride = 1 if stride is None else stride
         if start < 0:
-            start = start + len(self)
-        if stop < 0 and not (stride < 0 and stop == -1):
-            stop = stop + len(self)
+            start += len(self)
+        if stop < 0 and (stride >= 0 or stop != -1):
+            stop += len(self)
         if (stride > 0 and start >= stop) or (stride < 0 and start <= stop):
             return column_empty(0, self.dtype, masked=True)
-        # compute mask slice
         if stride == 1:
             return libcudf.copying.column_slice(self, [start, stop])[
                 0
             ]._with_type_metadata(self.dtype)
-        else:
-            # Need to create a gather map for given slice with stride
-            gather_map = arange(
-                start=start,
-                stop=stop,
-                step=stride,
-                dtype=cudf.dtype(np.int32),
-            )
-            return self.take(gather_map)
+        # Need to create a gather map for given slice with stride
+        gather_map = arange(
+            start=start,
+            stop=stop,
+            step=stride,
+            dtype=cudf.dtype(np.int32),
+        )
+        return self.take(gather_map)
 
     def __setitem__(self, key: Any, value: Any):
         """
@@ -687,14 +682,13 @@ class ColumnBase(Column, Serializable, BinaryOperand, Reducible):
         """`num_keys` is the number of keys to scatter. Should equal to the
         number of rows in ``value`` if ``value`` is a column.
         """
-        if isinstance(value, ColumnBase):
-            if len(value) != num_keys:
-                msg = (
-                    f"Size mismatch: cannot set value "
-                    f"of size {len(value)} to indexing result of size "
-                    f"{num_keys}"
-                )
-                raise ValueError(msg)
+        if isinstance(value, ColumnBase) and len(value) != num_keys:
+            msg = (
+                f"Size mismatch: cannot set value "
+                f"of size {len(value)} to indexing result of size "
+                f"{num_keys}"
+            )
+            raise ValueError(msg)
 
     def fillna(
         self: T,
@@ -969,13 +963,13 @@ class ColumnBase(Column, Serializable, BinaryOperand, Reducible):
         }:
             return self.as_string_column(dtype, **kwargs)
         elif is_list_dtype(dtype):
-            if not self.dtype == dtype:
+            if self.dtype != dtype:
                 raise NotImplementedError(
                     "Casting list columns not currently supported"
                 )
             return self
         elif is_struct_dtype(dtype):
-            if not self.dtype == dtype:
+            if self.dtype != dtype:
                 raise NotImplementedError(
                     "Casting struct columns not currently supported"
                 )
@@ -992,11 +986,7 @@ class ColumnBase(Column, Serializable, BinaryOperand, Reducible):
             return self.as_numerical_column(dtype, **kwargs)
 
     def as_categorical_column(self, dtype, **kwargs) -> ColumnBase:
-        if "ordered" in kwargs:
-            ordered = kwargs["ordered"]
-        else:
-            ordered = False
-
+        ordered = kwargs.get("ordered", False)
         # Re-label self w.r.t. the provided categories
         if (
             isinstance(dtype, cudf.CategoricalDtype)
@@ -1153,21 +1143,8 @@ class ColumnBase(Column, Serializable, BinaryOperand, Reducible):
         return drop_duplicates([self], keep="first")[0]
 
     def serialize(self) -> Tuple[dict, list]:
-        # data model:
-
-        # Serialization produces a nested metadata "header" and a flattened
-        # list of memoryviews/buffers that reference data (frames).  Each
-        # header advertises a frame_count slot which indicates how many
-        # frames deserialization will consume. The class used to construct
-        # an object is named under the key "type-serialized" to match with
-        # Dask's serialization protocol (see
-        # distributed.protocol.serialize). Since column dtypes may either be
-        # cudf native or foreign some special-casing is required here for
-        # serialization.
-
-        header: Dict[Any, Any] = {}
         frames = []
-        header["type-serialized"] = pickle.dumps(type(self))
+        header: Dict[Any, Any] = {"type-serialized": pickle.dumps(type(self))}
         try:
             dtype, dtype_frames = self.dtype.serialize()
             header["dtype"] = dtype
@@ -1277,11 +1254,10 @@ class ColumnBase(Column, Serializable, BinaryOperand, Reducible):
     ) -> Union[ColumnBase, ScalarLike]:
         skipna = True if skipna is None else skipna
 
-        if skipna:
-            if self.has_nulls():
+        if self.has_nulls():
+            if skipna:
                 result_col = self.dropna()
-        else:
-            if self.has_nulls():
+            else:
                 return cudf.utils.dtypes._get_nan_for_dtype(self.dtype)
 
         result_col = self
@@ -1529,7 +1505,7 @@ def build_column(
             null_count=null_count,
         )
     if is_categorical_dtype(dtype):
-        if not len(children) == 1:
+        if len(children) != 1:
             raise ValueError(
                 "Must specify exactly one child column for CategoricalColumn"
             )
@@ -1767,13 +1743,8 @@ def build_list_column(
     """
     dtype = ListDtype(element_type=elements.dtype)
     if size is None:
-        if indices.size == 0:
-            size = 0
-        else:
-            # one less because the last element of offsets is the number of
-            # bytes in the data buffer
-            size = indices.size - 1
-        size = size - offset
+        size = 0 if indices.size == 0 else indices.size - 1
+        size -= offset
 
     result = build_column(
         data=None,
@@ -1839,7 +1810,7 @@ def _make_copy_replacing_NaT_with_null(column):
         raise ValueError("This type does not support replacing NaT with null.")
 
     null = column_empty_like(column, masked=True, newsize=1)
-    out_col = cudf._lib.replace.replace(
+    return cudf._lib.replace.replace(
         column,
         build_column(
             as_buffer(np.array([na_value], dtype=column.dtype).view("|u1")),
@@ -1847,7 +1818,6 @@ def _make_copy_replacing_NaT_with_null(column):
         ),
         null,
     )
-    return out_col
 
 
 def as_column(

@@ -91,7 +91,7 @@ class TimeDeltaColumn(ColumnBase):
             raise ValueError("Buffer size must be divisible by element size")
         if size is None:
             size = data.size // dtype.itemsize
-            size = size - offset
+            size -= offset
         super().__init__(
             data,
             size=size,
@@ -101,7 +101,7 @@ class TimeDeltaColumn(ColumnBase):
             null_count=null_count,
         )
 
-        if not (self.dtype.type is np.timedelta64):
+        if self.dtype.type is not np.timedelta64:
             raise TypeError(f"{self.dtype} is not a supported duration type")
 
         self._time_unit, _ = np.datetime_data(self.dtype)
@@ -253,22 +253,21 @@ class TimeDeltaColumn(ColumnBase):
     def fillna(
         self, fill_value: Any = None, method: str = None, dtype: Dtype = None
     ) -> TimeDeltaColumn:
-        if fill_value is not None:
-            if cudf.utils.utils._isnat(fill_value):
-                return _fillna_natwise(self)
-            col: ColumnBase = self
-            if is_scalar(fill_value):
-                if isinstance(fill_value, np.timedelta64):
-                    dtype = determine_out_dtype(self.dtype, fill_value.dtype)
-                    fill_value = fill_value.astype(dtype)
-                    col = col.astype(dtype)
-                if not isinstance(fill_value, cudf.Scalar):
-                    fill_value = cudf.Scalar(fill_value, dtype=dtype)
-            else:
-                fill_value = column.as_column(fill_value, nan_as_null=False)
-            return cast(TimeDeltaColumn, ColumnBase.fillna(col, fill_value))
-        else:
+        if fill_value is None:
             return super().fillna(method=method)
+        if cudf.utils.utils._isnat(fill_value):
+            return _fillna_natwise(self)
+        col: ColumnBase = self
+        if is_scalar(fill_value):
+            if isinstance(fill_value, np.timedelta64):
+                dtype = determine_out_dtype(self.dtype, fill_value.dtype)
+                fill_value = fill_value.astype(dtype)
+                col = col.astype(dtype)
+            if not isinstance(fill_value, cudf.Scalar):
+                fill_value = cudf.Scalar(fill_value, dtype=dtype)
+        else:
+            fill_value = column.as_column(fill_value, nan_as_null=False)
+        return cast(TimeDeltaColumn, ColumnBase.fillna(col, fill_value))
 
     def as_numerical_column(
         self, dtype: Dtype, **kwargs
@@ -303,9 +302,7 @@ class TimeDeltaColumn(ColumnBase):
 
     def as_timedelta_column(self, dtype: Dtype, **kwargs) -> TimeDeltaColumn:
         dtype = cudf.dtype(dtype)
-        if dtype == self.dtype:
-            return self
-        return libcudf.unary.cast(self, dtype=dtype)
+        return self if dtype == self.dtype else libcudf.unary.cast(self, dtype=dtype)
 
     def mean(self, skipna=None, dtype: Dtype = np.float64) -> pd.Timedelta:
         return pd.Timedelta(

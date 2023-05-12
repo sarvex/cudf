@@ -100,29 +100,28 @@ class IntervalColumn(StructColumn):
         )
 
     def as_interval_column(self, dtype, **kwargs):
-        if is_interval_dtype(dtype):
-            if is_categorical_dtype(self):
-                new_struct = self._get_decategorized_column()
-                return IntervalColumn.from_struct_column(new_struct)
-            if is_interval_dtype(dtype):
-                # a user can directly input the string `interval` as the dtype
-                # when creating an interval series or interval dataframe
-                if dtype == "interval":
-                    dtype = IntervalDtype(
-                        self.dtype.fields["left"], self.closed
-                    )
-                children = self.children
-                return IntervalColumn(
-                    size=self.size,
-                    dtype=dtype,
-                    mask=self.mask,
-                    offset=self.offset,
-                    null_count=self.null_count,
-                    children=children,
-                    closed=dtype.closed,
-                )
-        else:
+        if not is_interval_dtype(dtype):
             raise ValueError("dtype must be IntervalDtype")
+        if is_categorical_dtype(self):
+            new_struct = self._get_decategorized_column()
+            return IntervalColumn.from_struct_column(new_struct)
+        if is_interval_dtype(dtype):
+            # a user can directly input the string `interval` as the dtype
+            # when creating an interval series or interval dataframe
+            if dtype == "interval":
+                dtype = IntervalDtype(
+                    self.dtype.fields["left"], self.closed
+                )
+            children = self.children
+            return IntervalColumn(
+                size=self.size,
+                dtype=dtype,
+                mask=self.mask,
+                offset=self.offset,
+                null_count=self.null_count,
+                children=children,
+                closed=dtype.closed,
+            )
 
     def to_pandas(self, index: pd.Index = None, **kwargs) -> "pd.Series":
         # Note: This does not handle null values in the interval column.

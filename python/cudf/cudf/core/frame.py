@@ -148,16 +148,15 @@ class Frame(BinaryOperand, Scannable):
     def _mimic_inplace(
         self: T, result: T, inplace: bool = False
     ) -> Optional[Frame]:
-        if inplace:
-            for col in self._data:
-                if col in result._data:
-                    self._data[col]._mimic_inplace(
-                        result._data[col], inplace=True
-                    )
-            self._data = result._data
-            return None
-        else:
+        if not inplace:
             return result
+        for col in self._data:
+            if col in result._data:
+                self._data[col]._mimic_inplace(
+                    result._data[col], inplace=True
+                )
+        self._data = result._data
+        return None
 
     @property
     def size(self):
@@ -888,10 +887,7 @@ class Frame(BinaryOperand, Scannable):
         if isinstance(value, cudf.Series):
             value = value.reindex(self._data.names)
         elif isinstance(value, cudf.DataFrame):
-            if not self.index.equals(value.index):
-                value = value.reindex(self.index)
-            else:
-                value = value
+            value = value if self.index.equals(value.index) else value.reindex(self.index)
         elif not isinstance(value, abc.Mapping):
             value = {name: copy.deepcopy(value) for name in self._data.names}
         else:
@@ -904,16 +900,15 @@ class Frame(BinaryOperand, Scannable):
 
         filled_data = {}
         for col_name, col in self._data.items():
-            if col_name in value and method is None:
-                replace_val = value[col_name]
-            else:
-                replace_val = None
-            should_fill = (
-                col_name in value
-                and col.contains_na_entries
-                and not libcudf.scalar._is_null_host_scalar(replace_val)
-            ) or method is not None
-            if should_fill:
+            replace_val = value[col_name] if col_name in value and method is None else None
+            if (
+                should_fill := (
+                    col_name in value
+                    and col.contains_na_entries
+                    and not libcudf.scalar._is_null_host_scalar(replace_val)
+                )
+                or method is not None
+            ):
                 filled_data[col_name] = col.fillna(replace_val, method)
             else:
                 filled_data[col_name] = col.copy(deep=True)
@@ -943,17 +938,9 @@ class Frame(BinaryOperand, Scannable):
         """
         out_cols = []
 
-        if subset is None:
-            df = self
-        else:
-            df = self.take(subset)
-
+        df = self if subset is None else self.take(subset)
         if thresh is None:
-            if how == "all":
-                thresh = 1
-            else:
-                thresh = len(df)
-
+            thresh = 1 if how == "all" else len(df)
         for name, col in df._data.items():
             try:
                 check_col = col.nans_to_nulls()
@@ -1076,7 +1063,7 @@ class Frame(BinaryOperand, Scannable):
             # as dictionary size can vary, it can't be a single table
             cudf_dictionaries_columns = {
                 name: ColumnBase.from_arrow(dict_dictionaries[name])
-                for name in dict_dictionaries.keys()
+                for name in dict_dictionaries
             }
 
             cudf_category_frame = {
@@ -1093,14 +1080,11 @@ class Frame(BinaryOperand, Scannable):
             }
 
         # Handle non-dict arrays
-        cudf_non_category_frame = {
-            name: col
-            for name, col in zip(
-                data.column_names, libcudf.interop.from_arrow(data)
-            )
-        }
+        cudf_non_category_frame = dict(
+            zip(data.column_names, libcudf.interop.from_arrow(data))
+        )
 
-        result = {**cudf_non_category_frame, **cudf_category_frame}
+        result = cudf_non_category_frame | cudf_category_frame
 
         # There are some special cases that need to be handled
         # based on metadata.
@@ -1433,10 +1417,7 @@ class Frame(BinaryOperand, Scannable):
         if na_position not in {"first", "last"}:
             raise ValueError(f"invalid na_position: {na_position}")
 
-        scalar_flag = None
-        if is_scalar(values):
-            scalar_flag = True
-
+        scalar_flag = True if is_scalar(values) else None
         if not isinstance(values, Frame):
             values = [as_column(values)]
         else:
@@ -1461,10 +1442,7 @@ class Frame(BinaryOperand, Scannable):
         # Return result as cupy array if the values is non-scalar
         # If values is scalar, result is expected to be scalar.
         result = cupy.asarray(outcol.data_array_view(mode="read"))
-        if scalar_flag:
-            return result[0].item()
-        else:
-            return result
+        return result[0].item() if scalar_flag else result
 
     @_cudf_nvtx_annotate
     def argsort(
@@ -1860,9 +1838,7 @@ class Frame(BinaryOperand, Scannable):
         result = lhs.dot(rhs)
         if len(result.shape) == 1:
             return cudf.Series(result)
-        if len(result.shape) == 2:
-            return cudf.DataFrame(result)
-        return result.item()
+        return cudf.DataFrame(result) if len(result.shape) == 2 else result.item()
 
     def __matmul__(self, other):
         return self.dot(other)
@@ -2706,10 +2682,7 @@ class Frame(BinaryOperand, Scannable):
         3    1
         4    0
         """
-        if n == 0:
-            return self.iloc[0:0]
-
-        return self.iloc[-n:]
+        return self.iloc[:0] if n == 0 else self.iloc[-n:]
 
     @_cudf_nvtx_annotate
     @copy_docstring(Rolling)

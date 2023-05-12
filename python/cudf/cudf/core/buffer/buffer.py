@@ -303,9 +303,10 @@ class Buffer(Serializable):
             serializable metadata required to reconstruct the object. The
             second element is a list containing Buffers and memoryviews.
         """
-        header: Dict[str, Any] = {}
-        header["type-serialized"] = pickle.dumps(type(self))
-        header["frame_count"] = 1
+        header: Dict[str, Any] = {
+            "type-serialized": pickle.dumps(type(self)),
+            "frame_count": 1,
+        }
         frames = [self]
         return header, frames
 
@@ -364,7 +365,7 @@ def is_c_contiguous(
         The boolean answer.
     """
 
-    if any(dim == 0 for dim in shape):
+    if 0 in shape:
         return True
     cumulative_stride = itemsize
     for dim, stride in zip(reversed(shape), reversed(strides)):

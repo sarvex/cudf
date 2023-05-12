@@ -438,9 +438,7 @@ class MultiIndex(Frame, BaseIndex, NotIterable):
             codes = self._codes if codes is None else codes
             names = self.names if names is None else names
 
-            mi = MultiIndex(levels=levels, codes=codes, names=names, copy=deep)
-            return mi
-
+            return MultiIndex(levels=levels, codes=codes, names=names, copy=deep)
         mi = MultiIndex._from_data(self._data.copy(deep=deep))
         if self._levels is not None:
             mi._levels = [s.copy(deep) for s in self._levels]
@@ -486,12 +484,10 @@ class MultiIndex(Frame, BaseIndex, NotIterable):
 
             tuples_list = list(
                 zip(
-                    *list(
+                    *[
                         map(lambda val: pd.NA if val is None else val, col)
-                        for col in preprocess_df.to_arrow()
-                        .to_pydict()
-                        .values()
-                    )
+                        for col in preprocess_df.to_arrow().to_pydict().values()
+                    ]
                 )
             )
 
@@ -519,13 +515,16 @@ class MultiIndex(Frame, BaseIndex, NotIterable):
         output = output.lstrip(output_prefix)
         lines = output.split("\n")
 
-        if len(lines) > 1:
-            if "length=" in lines[-1] and len(self) != len(preprocess):
-                last_line = lines[-1]
-                length_index = last_line.index("length=")
-                last_line = last_line[:length_index] + f"length={len(self)})"
-                lines = lines[:-1]
-                lines.append(last_line)
+        if (
+            len(lines) > 1
+            and "length=" in lines[-1]
+            and len(self) != len(preprocess)
+        ):
+            last_line = lines[-1]
+            length_index = last_line.index("length=")
+            last_line = last_line[:length_index] + f"length={len(self)})"
+            lines = lines[:-1]
+            lines.append(last_line)
 
         data_output = "\n".join(lines)
         return output_prefix + data_output
@@ -623,10 +622,7 @@ class MultiIndex(Frame, BaseIndex, NotIterable):
             label will be returned as per the index.
         """
 
-        if level in self._data.names:
-            return level
-        else:
-            return self._data.names[level]
+        return level if level in self._data.names else self._data.names[level]
 
     @_cudf_nvtx_annotate
     def isin(self, values, level=None):
@@ -821,11 +817,7 @@ class MultiIndex(Frame, BaseIndex, NotIterable):
 
         slice_access = isinstance(index_key, slice)
         out_index = cudf.DataFrame()
-        # Select the last n-k columns where n is the number of columns and k is
-        # the length of the indexing tuple
-        size = 0
-        if not isinstance(index_key, (numbers.Number, slice)):
-            size = len(index_key)
+        size = 0 if isinstance(index_key, (numbers.Number, slice)) else len(index_key)
         for k in range(size, len(index._data)):
             out_index.insert(
                 out_index._num_columns,
@@ -901,8 +893,7 @@ class MultiIndex(Frame, BaseIndex, NotIterable):
         )
         indices = cudf.Series(valid_indices)
         result = df.take(indices)
-        final = self._index_and_downcast(result, result.index, row_tuple)
-        return final
+        return self._index_and_downcast(result, result.index, row_tuple)
 
     @_cudf_nvtx_annotate
     def _validate_indexer(
@@ -934,13 +925,17 @@ class MultiIndex(Frame, BaseIndex, NotIterable):
     @_cudf_nvtx_annotate
     def __eq__(self, other):
         if isinstance(other, MultiIndex):
-            for self_col, other_col in zip(
-                self._data.values(),
-                other._data.values(),
-            ):
-                if not self_col.equals(other_col):
-                    return False
-            return self.names == other.names
+            return next(
+                (
+                    False
+                    for self_col, other_col in zip(
+                        self._data.values(),
+                        other._data.values(),
+                    )
+                    if not self_col.equals(other_col)
+                ),
+                self.names == other.names,
+            )
         return NotImplemented
 
     @property  # type: ignore
@@ -1027,23 +1022,21 @@ class MultiIndex(Frame, BaseIndex, NotIterable):
         An Index containing the values at the requested level.
         """
         colnames = self._data.names
-        if level not in colnames:
-            if isinstance(level, int):
-                if level < 0:
-                    level = level + len(colnames)
-                if level < 0 or level >= len(colnames):
-                    raise IndexError(f"Invalid level number: '{level}'")
-                level_idx = level
-                level = colnames[level_idx]
-            elif level in self.names:
-                level_idx = list(self.names).index(level)
-                level = colnames[level_idx]
-            else:
-                raise KeyError(f"Level not found: '{level}'")
-        else:
+        if level in colnames:
             level_idx = colnames.index(level)
-        level_values = as_index(self._data[level], name=self.names[level_idx])
-        return level_values
+        elif isinstance(level, int):
+            if level < 0:
+                level = level + len(colnames)
+            if level < 0 or level >= len(colnames):
+                raise IndexError(f"Invalid level number: '{level}'")
+            level_idx = level
+            level = colnames[level_idx]
+        elif level in self.names:
+            level_idx = list(self.names).index(level)
+            level = colnames[level_idx]
+        else:
+            raise KeyError(f"Level not found: '{level}'")
+        return as_index(self._data[level], name=self.names[level_idx])
 
     def _is_numeric(self):
         return False
@@ -1082,8 +1075,8 @@ class MultiIndex(Frame, BaseIndex, NotIterable):
         source_data = cudf.DataFrame._concat(source_data)
         names = [None] * source_data._num_columns
         objs = list(filter(lambda o: o.names is not None, objs))
-        for o in range(len(objs)):
-            for i, name in enumerate(objs[o].names):
+        for obj_ in objs:
+            for i, name in enumerate(obj_.names):
                 names[i] = names[i] or name
         return cudf.MultiIndex.from_frame(source_data, names=names)
 
@@ -1461,10 +1454,7 @@ class MultiIndex(Frame, BaseIndex, NotIterable):
         """
         mi = self.copy(deep=False)
         mi._poplevels(level)
-        if mi.nlevels == 1:
-            return mi.get_level_values(mi.names[0])
-        else:
-            return mi
+        return mi.get_level_values(mi.names[0]) if mi.nlevels == 1 else mi
 
     @_cudf_nvtx_annotate
     def to_pandas(self, nullable=False, **kwargs):
@@ -1690,10 +1680,7 @@ class MultiIndex(Frame, BaseIndex, NotIterable):
         if hasattr(cudf_df_module, fname):
             cudf_func = getattr(cudf_df_module, fname)
             # Handle case if cudf_func is same as numpy function
-            if cudf_func is func:
-                return NotImplemented
-            else:
-                return cudf_func(*args, **kwargs)
+            return NotImplemented if cudf_func is func else cudf_func(*args, **kwargs)
         else:
             return NotImplemented
 
@@ -1836,9 +1823,7 @@ class MultiIndex(Frame, BaseIndex, NotIterable):
         case make a shallow copy of self.
         """
         names = self._maybe_match_names(other)
-        if self.names != names:
-            return self.rename(names)
-        return self
+        return self.rename(names) if self.names != names else self
 
     def _maybe_match_names(self, other):
         """
@@ -1876,9 +1861,7 @@ class MultiIndex(Frame, BaseIndex, NotIterable):
 
         midx = MultiIndex.from_frame(result_df.iloc[:, : self.nlevels])
         midx.names = self.names if self.names == other.names else None
-        if sort is None and len(other):
-            return midx.sort_values()
-        return midx
+        return midx.sort_values() if sort is None and len(other) else midx
 
     @_cudf_nvtx_annotate
     def _intersection(self, other, sort=None):
@@ -1899,9 +1882,7 @@ class MultiIndex(Frame, BaseIndex, NotIterable):
 
         result_df = cudf.merge(self_df, other_df, how="inner")
         midx = self.__class__.from_frame(result_df, names=res_name)
-        if sort is None and len(other):
-            return midx.sort_values()
-        return midx
+        return midx.sort_values() if sort is None and len(other) else midx
 
     @_cudf_nvtx_annotate
     def _copy_type_metadata(

@@ -188,17 +188,16 @@ def to_datetime(
                 value = unit_rev.get(u)
                 if value is not None and value in arg:
                     arg_col = arg._data[value]
-                    if arg_col.dtype.kind in ("f"):
+                    if (
+                        arg_col.dtype.kind not in "f"
+                        and arg_col.dtype.kind in ("O")
+                        and not cpp_is_integer(arg_col).all()
+                        or arg_col.dtype.kind in ("f")
+                    ):
                         col = new_series._column.as_datetime_column(
                             "datetime64[ns]", format=format
                         )
                         break
-                    elif arg_col.dtype.kind in ("O"):
-                        if not cpp_is_integer(arg_col).all():
-                            col = new_series._column.as_datetime_column(
-                                "datetime64[ns]", format=format
-                            )
-                            break
 
             times_column = None
             for u in ["h", "m", "s", "ms", "us", "ns"]:
@@ -263,10 +262,7 @@ def to_datetime(
                 format=format,
             )
 
-            if is_scalar(arg):
-                return col.element_indexing(0)
-            else:
-                return as_index(col)
+            return col.element_indexing(0) if is_scalar(arg) else as_index(col)
     except Exception as e:
         if errors == "raise":
             raise e
@@ -367,10 +363,7 @@ def get_units(value):
         return _unit_map[value]
 
     # m is case significant
-    if value.lower() in _unit_map:
-        return _unit_map[value.lower()]
-
-    return value
+    return _unit_map[value.lower()] if value.lower() in _unit_map else value
 
 
 _T = TypeVar("_T", bound="DateOffset")
@@ -522,15 +515,13 @@ class DateOffset:
 
         unsupported_units = all_possible_units - supported_units
 
-        invalid_kwds = set(kwds) - supported_units - unsupported_units
-        if invalid_kwds:
+        if invalid_kwds := set(kwds) - supported_units - unsupported_units:
             raise TypeError(
                 f"Keyword arguments '{','.join(list(invalid_kwds))}'"
                 " are not recognized"
             )
 
-        unsupported_kwds = set(kwds) & unsupported_units
-        if unsupported_kwds:
+        if unsupported_kwds := set(kwds) & unsupported_units:
             raise NotImplementedError(
                 f"Keyword arguments '{','.join(list(unsupported_kwds))}'"
                 " are not yet supported."
@@ -620,10 +611,7 @@ class DateOffset:
     def _generate_months_column(self, size, op):
         months = self._scalars["months"]
         months = -months if op == "__sub__" else months
-        # TODO: pass a scalar instead of constructing a column
-        # https://github.com/rapidsai/cudf/issues/6990
-        col = cudf.core.column.as_column(months, length=size)
-        return col
+        return cudf.core.column.as_column(months, length=size)
 
     @property
     def _is_no_op(self) -> bool:
@@ -642,9 +630,7 @@ class DateOffset:
             if val is not None:
                 includes.append(f"{unit}={val}")
         unit_data = ", ".join(includes)
-        repr_str = f"<{self.__class__.__name__}: {unit_data}>"
-
-        return repr_str
+        return f"<{self.__class__.__name__}: {unit_data}>"
 
     @classmethod
     def _from_freqstr(cls: Type[_T], freqstr: str) -> _T:

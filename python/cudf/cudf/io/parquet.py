@@ -67,11 +67,14 @@ def _write_parquet(
             ValueError("partition info is required for multiple paths")
         elif not is_list_like(partitions_info):
             ValueError("partition info must be list-like for multiple paths")
-        elif not len(paths) == len(partitions_info):
+        elif len(paths) != len(partitions_info):
             ValueError("partitions_info and paths must be of same size")
-    if is_list_like(partitions_info) and len(partitions_info) > 1:
-        if not is_list_like(paths):
-            ValueError("paths must be list-like when partitions_info provided")
+    if (
+        is_list_like(partitions_info)
+        and len(partitions_info) > 1
+        and not is_list_like(paths)
+    ):
+        ValueError("paths must be list-like when partitions_info provided")
 
     paths_or_bufs = [
         ioutils.get_writer_filepath_or_buffer(
@@ -216,7 +219,7 @@ def write_to_dataset(
             storage_options=storage_options,
         )
         metadata_file_path = metadata_file_paths if return_metadata else None
-        metadata = to_parquet(
+        return to_parquet(
             df=grouped_df,
             path=full_paths,
             compression=compression,
@@ -239,7 +242,7 @@ def write_to_dataset(
 
         metadata_file_path = filename if return_metadata else None
 
-        metadata = df.to_parquet(
+        return df.to_parquet(
             path=full_path,
             compression=compression,
             index=preserve_index,
@@ -253,8 +256,6 @@ def write_to_dataset(
             max_page_size_rows=max_page_size_rows,
             force_nullable_schema=force_nullable_schema,
         )
-
-    return metadata
 
 
 @ioutils.doc_read_parquet_metadata()
@@ -367,7 +368,7 @@ def _process_dataset(
             raise ValueError(
                 "Cannot specify a row_group selection for a directory path."
             )
-        row_groups_map = {path: rgs for path, rgs in zip(paths, row_groups)}
+        row_groups_map = dict(zip(paths, row_groups))
 
     # Apply filters and discover partition columns
     partition_keys = []
@@ -385,10 +386,7 @@ def _process_dataset(
                     file_fragment.partition_expression
                 )
                 partition_keys.append(
-                    [
-                        (name, raw_keys[name])
-                        for name in partition_categories.keys()
-                    ]
+                    [(name, raw_keys[name]) for name in partition_categories]
                 )
 
             # Apply row-group filtering
@@ -471,9 +469,8 @@ def read_parquet(
             row_groups = [row_groups]
 
     # Check columns input
-    if columns is not None:
-        if not is_list_like(columns):
-            raise ValueError("Expected list like for columns")
+    if columns is not None and not is_list_like(columns):
+        raise ValueError("Expected list like for columns")
 
     # Start by trying construct a filesystem object, so we
     # can apply filters on remote file-systems
@@ -672,32 +669,29 @@ def _read_parquet(
     *args,
     **kwargs,
 ):
-    # Simple helper function to dispatch between
-    # cudf and pyarrow to read parquet data
-    if engine == "cudf":
-        if kwargs:
-            raise ValueError(
-                "cudf engine doesn't support the "
-                f"following keyword arguments: {list(kwargs.keys())}"
-            )
-        if args:
-            raise ValueError(
-                "cudf engine doesn't support the "
-                f"following positional arguments: {list(args)}"
-            )
-        return libparquet.read_parquet(
-            filepaths_or_buffers,
-            columns=columns,
-            row_groups=row_groups,
-            strings_to_categorical=strings_to_categorical,
-            use_pandas_metadata=use_pandas_metadata,
-        )
-    else:
+    if engine != "cudf":
         return cudf.DataFrame.from_arrow(
             pq.ParquetDataset(filepaths_or_buffers).read_pandas(
                 columns=columns, *args, **kwargs
             )
         )
+    if kwargs:
+        raise ValueError(
+            "cudf engine doesn't support the "
+            f"following keyword arguments: {list(kwargs.keys())}"
+        )
+    if args:
+        raise ValueError(
+            "cudf engine doesn't support the "
+            f"following positional arguments: {list(args)}"
+        )
+    return libparquet.read_parquet(
+        filepaths_or_buffers,
+        columns=columns,
+        row_groups=row_groups,
+        strings_to_categorical=strings_to_categorical,
+        use_pandas_metadata=use_pandas_metadata,
+    )
 
 
 @ioutils.doc_to_parquet()
@@ -739,12 +733,13 @@ def to_parquet(
             )
         # Ensure that no columns dtype is 'category'
         for col in df._column_names:
-            if partition_cols is None or col not in partition_cols:
-                if df[col].dtype.name == "category":
-                    raise ValueError(
-                        "'category' column dtypes are currently not "
-                        + "supported by the gpu accelerated parquet writer"
-                    )
+            if (partition_cols is None or col not in partition_cols) and df[
+                col
+            ].dtype.name == "category":
+                raise ValueError(
+                    "'category' column dtypes are currently not "
+                    + "supported by the gpu accelerated parquet writer"
+                )
 
         if partition_cols:
             if metadata_file_path is not None:
@@ -844,10 +839,7 @@ def _get_estimated_file_size(df):
     # and 0.6 times else-wise.
     # Y(file_size) = M(0.6) * X(df_mem_usage) + C(705)
     file_size = int((df_mem_usage * 0.6) + 705)
-    # 1000 Bytes accounted for row-group metadata.
-    # A parquet file takes roughly ~810 Bytes of metadata per column.
-    file_size = file_size + 1000 + (810 * df.shape[1])
-    return file_size
+    return file_size + 1000 + (810 * df.shape[1])
 
 
 @_cudf_nvtx_annotate
@@ -965,16 +957,12 @@ def _parse_bytes(s):
     try:
         n = float(prefix)
     except ValueError as e:
-        raise ValueError(
-            "Could not interpret '%s' as a number" % prefix
-        ) from e
+        raise ValueError(f"Could not interpret '{prefix}' as a number") from e
 
     try:
         multiplier = BYTE_SIZES[suffix.lower()]
     except KeyError as e:
-        raise ValueError(
-            "Could not interpret '%s' as a byte unit" % suffix
-        ) from e
+        raise ValueError(f"Could not interpret '{suffix}' as a byte unit") from e
 
     result = n * multiplier
     return int(result)
@@ -1150,8 +1138,7 @@ class ParquetDatasetWriter:
                     full_offsets.append(end)
 
                 curr_file_num = 0
-                num_chunks = 0
-                while num_chunks < parts:
+                for _ in range(parts):
                     new_file_name = f"{self.filename}_{curr_file_num}.parquet"
                     new_full_path = fs.sep.join([prefix, new_file_name])
 
@@ -1174,7 +1161,6 @@ class ParquetDatasetWriter:
                     metadata_file_paths.append(
                         fs.sep.join([subdir, new_file_name])
                     )
-                    num_chunks += 1
                     curr_file_num += 1
             else:
                 self.filename = self.filename or _generate_filename()

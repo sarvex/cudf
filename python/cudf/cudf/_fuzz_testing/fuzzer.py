@@ -59,17 +59,11 @@ class Fuzzer:
     def write_crash(self, error):
         error_file_name = str(datetime.datetime.now())
         if self._crash_dir:
-            crash_path = os.path.join(
-                self._crash_dir,
-                error_file_name + "_crash.json",
-            )
-            crash_log_path = os.path.join(
-                self._crash_dir,
-                error_file_name + "_crash.log",
-            )
+            crash_path = os.path.join(self._crash_dir, f"{error_file_name}_crash.json")
+            crash_log_path = os.path.join(self._crash_dir, f"{error_file_name}_crash.log")
         else:
-            crash_path = error_file_name + "_crash.json"
-            crash_log_path = error_file_name + "_crash.log"
+            crash_path = f"{error_file_name}_crash.json"
+            crash_log_path = f"{error_file_name}_crash.log"
 
         with open(crash_path, "w") as f:
             json.dump(

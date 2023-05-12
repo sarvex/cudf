@@ -73,8 +73,7 @@ def _get_best_ptx_file(archs, max_compute_capability):
     Determine of the available PTX files which one is
     the most recent up to and including the device cc
     """
-    filtered_archs = [x for x in archs if x[0] <= max_compute_capability]
-    if filtered_archs:
+    if filtered_archs := [x for x in archs if x[0] <= max_compute_capability]:
         return max(filtered_archs, key=lambda y: y[0])
     else:
         return None
@@ -91,7 +90,7 @@ def _get_ptx_file(path, prefix):
         # the current device's.
         cc = int("".join(str(x) for x in dev.compute_capability))
     files = glob.glob(os.path.join(path, f"{prefix}*.ptx"))
-    if len(files) == 0:
+    if not files:
         raise RuntimeError(f"Missing PTX files for cc={cc}")
     regular_sms = []
 
@@ -105,11 +104,7 @@ def _get_ptx_file(path, prefix):
         else:
             regular_sms.append((int(sm_number), f))
 
-    regular_result = None
-
-    if regular_sms:
-        regular_result = _get_best_ptx_file(regular_sms, cc)
-
+    regular_result = _get_best_ptx_file(regular_sms, cc) if regular_sms else None
     if regular_result is None:
         raise RuntimeError(
             "This cuDF installation is missing the necessary PTX "
@@ -318,11 +313,9 @@ def _get_kernel(kernel_string, globals_, sig, func):
     globals_["f_"] = f_
     exec(kernel_string, globals_)
     _kernel = globals_["_kernel"]
-    kernel = cuda.jit(
-        sig, link=[_PTX_FILE], extensions=[str_view_arg_handler]
-    )(_kernel)
-
-    return kernel
+    return cuda.jit(sig, link=[_PTX_FILE], extensions=[str_view_arg_handler])(
+        _kernel
+    )
 
 
 def _get_input_args_from_frame(fr):

@@ -33,12 +33,10 @@ class PythonFuzz:
 def pythonfuzz(function=None, data_handle=None, params=None, **kwargs):
     if function:
         return PythonFuzz(function, params, **kwargs)
-    else:
+    def wrapper(function):
+        return PythonFuzz(function, params, data_handle, **kwargs)
 
-        def wrapper(function):
-            return PythonFuzz(function, params, data_handle, **kwargs)
-
-        return wrapper
+    return wrapper
 
 
 if __name__ == "__main__":

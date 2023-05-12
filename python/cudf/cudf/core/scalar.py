@@ -168,13 +168,12 @@ class Scalar(BinaryOperand, metaclass=CachedScalarInstanceMeta):
     # todo: change to cached property
     @property
     def dtype(self):
-        if self._is_host_value_current:
-            if isinstance(self._host_value, str):
-                return cudf.dtype("object")
-            else:
-                return self._host_dtype
-        else:
+        if not self._is_host_value_current:
             return self.device_value.dtype
+        if isinstance(self._host_value, str):
+            return cudf.dtype("object")
+        else:
+            return self._host_dtype
 
     def is_valid(self):
         if not self._is_host_value_current:
@@ -190,11 +189,10 @@ class Scalar(BinaryOperand, metaclass=CachedScalarInstanceMeta):
         if isinstance(value, list):
             if dtype is not None:
                 raise TypeError("Lists may not be cast to a different dtype")
-            else:
-                dtype = ListDtype.from_arrow(
-                    pa.infer_type([value], from_pandas=True)
-                )
-                return value, dtype
+            dtype = ListDtype.from_arrow(
+                pa.infer_type([value], from_pandas=True)
+            )
+            return value, dtype
         elif isinstance(dtype, ListDtype):
             if value not in {None, NA}:
                 raise ValueError(f"Can not coerce {value} to ListDtype")
@@ -223,22 +221,21 @@ class Scalar(BinaryOperand, metaclass=CachedScalarInstanceMeta):
         value = to_cudf_compatible_scalar(value, dtype=dtype)
 
         if dtype is None:
-            if not valid:
-                if isinstance(value, (np.datetime64, np.timedelta64)):
-                    unit, _ = np.datetime_data(value)
-                    if unit == "generic":
-                        raise TypeError(
-                            "Cant convert generic NaT to null scalar"
-                        )
-                    else:
-                        dtype = value.dtype
-                else:
-                    raise TypeError(
-                        "dtype required when constructing a null scalar"
-                    )
-            else:
+            if valid:
                 dtype = value.dtype
 
+            elif isinstance(value, (np.datetime64, np.timedelta64)):
+                unit, _ = np.datetime_data(value)
+                if unit == "generic":
+                    raise TypeError(
+                        "Cant convert generic NaT to null scalar"
+                    )
+                else:
+                    dtype = value.dtype
+            else:
+                raise TypeError(
+                    "dtype required when constructing a null scalar"
+                )
         if not isinstance(dtype, cudf.core.dtypes.DecimalDtype):
             dtype = cudf.dtype(dtype)
 
@@ -254,11 +251,11 @@ class Scalar(BinaryOperand, metaclass=CachedScalarInstanceMeta):
         """
         if self._is_host_value_current and self._is_device_value_current:
             return
-        elif self._is_host_value_current and not self._is_device_value_current:
+        elif self._is_host_value_current:
             self._device_value = cudf._lib.scalar.DeviceScalar(
                 self._host_value, self._host_dtype
             )
-        elif self._is_device_value_current and not self._is_host_value_current:
+        elif self._is_device_value_current:
             self._host_value = self._device_value.value
             self._host_dtype = self._host_value.dtype
         else:
@@ -325,31 +322,28 @@ class Scalar(BinaryOperand, metaclass=CachedScalarInstanceMeta):
                 "m",
             }:
                 return other.dtype
-            else:
-                if (
+            if (
                     op == "__sub__"
                     and self.dtype.char == other.dtype.char == "M"
                 ):
-                    res, _ = np.datetime_data(max(self.dtype, other.dtype))
-                    return cudf.dtype("m8" + f"[{res}]")
-                return np.result_type(self.dtype, other.dtype)
+                res, _ = np.datetime_data(max(self.dtype, other.dtype))
+                return cudf.dtype(f"m8[{res}]")
+            return np.result_type(self.dtype, other.dtype)
 
         return cudf.dtype(out_dtype)
 
     def _binaryop(self, other, op: str):
-        if is_scalar(other):
-            other = to_cudf_compatible_scalar(other)
-            out_dtype = self._binop_result_dtype_or_error(other, op)
-            valid = self.is_valid() and (
-                isinstance(other, np.generic) or other.is_valid()
-            )
-            if not valid:
-                return Scalar(None, dtype=out_dtype)
-            else:
-                result = self._dispatch_scalar_binop(other, op)
-                return Scalar(result, dtype=out_dtype)
-        else:
+        if not is_scalar(other):
             return NotImplemented
+        other = to_cudf_compatible_scalar(other)
+        out_dtype = self._binop_result_dtype_or_error(other, op)
+        if valid := self.is_valid() and (
+            isinstance(other, np.generic) or other.is_valid()
+        ):
+            result = self._dispatch_scalar_binop(other, op)
+            return Scalar(result, dtype=out_dtype)
+        else:
+            return Scalar(None, dtype=out_dtype)
 
     def _dispatch_scalar_binop(self, other, op):
         if isinstance(other, Scalar):
@@ -387,11 +381,7 @@ class Scalar(BinaryOperand, metaclass=CachedScalarInstanceMeta):
     def _dispatch_scalar_unaop(self, op):
         if op == "__floor__":
             return np.floor(self.value)
-        if op == "__ceil__":
-            return np.ceil(self.value)
-        return getattr(self.value, op)()
+        return np.ceil(self.value) if op == "__ceil__" else getattr(self.value, op)()
 
     def astype(self, dtype):
-        if self.dtype == dtype:
-            return self
-        return Scalar(self.value, dtype)
+        return self if self.dtype == dtype else Scalar(self.value, dtype)

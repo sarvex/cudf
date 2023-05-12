@@ -225,20 +225,18 @@ class NumericalColumn(NumericalBaseColumn):
                 tmp = self if reflect else other
                 # Guard against division by zero for integers.
                 if (
-                    (tmp.dtype.type in int_float_dtype_mapping)
-                    and (tmp.dtype.type != np.bool_)
+                    tmp.dtype.type in int_float_dtype_mapping
+                    and tmp.dtype.type != np.bool_
                     and (
                         (
-                            (
-                                np.isscalar(tmp)
-                                or (
-                                    isinstance(tmp, cudf.Scalar)
-                                    # host to device copy
-                                    and tmp.is_valid()
-                                )
+                            np.isscalar(tmp)
+                            or (
+                                isinstance(tmp, cudf.Scalar)
+                                # host to device copy
+                                and tmp.is_valid()
                             )
-                            and (0 == tmp)
                         )
+                        and tmp == 0
                         or ((isinstance(tmp, NumericalColumn)) and (0 in tmp))
                     )
                 ):
@@ -287,9 +285,7 @@ class NumericalColumn(NumericalBaseColumn):
         self, other: ScalarLike
     ) -> Union[ColumnBase, cudf.Scalar]:
         if isinstance(other, ColumnBase):
-            if not isinstance(other, NumericalColumn):
-                return NotImplemented
-            return other
+            return NotImplemented if not isinstance(other, NumericalColumn) else other
         if isinstance(other, cudf.Scalar):
             if self.dtype == other.dtype:
                 return other
@@ -310,12 +306,11 @@ class NumericalColumn(NumericalBaseColumn):
         # np.promote_types(np.asarray([0], dtype=np.int64).dtype, np.uint8)
         #   => np.int64
         common_dtype = np.result_type(self.dtype, other)
-        if common_dtype.kind in {"b", "i", "u", "f"}:
-            if self.dtype.kind == "b":
-                common_dtype = min_signed_type(other)
-            return cudf.Scalar(other, dtype=common_dtype)
-        else:
+        if common_dtype.kind not in {"b", "i", "u", "f"}:
             return NotImplemented
+        if self.dtype.kind == "b":
+            common_dtype = min_signed_type(other)
+        return cudf.Scalar(other, dtype=common_dtype)
 
     def int2ip(self) -> "cudf.core.column.StringColumn":
         if self.dtype != cudf.dtype("int64"):
@@ -370,9 +365,7 @@ class NumericalColumn(NumericalBaseColumn):
 
     def as_numerical_column(self, dtype: Dtype, **kwargs) -> NumericalColumn:
         dtype = cudf.dtype(dtype)
-        if dtype == self.dtype:
-            return self
-        return libcudf.unary.cast(self, dtype)
+        return self if dtype == self.dtype else libcudf.unary.cast(self, dtype)
 
     def all(self, skipna: bool = True) -> bool:
         # If all entries are null the result is True, including when the column
@@ -631,35 +624,28 @@ class NumericalColumn(NumericalBaseColumn):
         if self.dtype.kind == to_dtype.kind:
             if self.dtype <= to_dtype:
                 return True
+            # Kinds are the same but to_dtype is smaller
+            if "float" in to_dtype.name:
+                finfo = np.finfo(to_dtype)
+                lower_, upper_ = finfo.min, finfo.max
+            elif "int" in to_dtype.name:
+                iinfo = np.iinfo(to_dtype)
+                lower_, upper_ = iinfo.min, iinfo.max
+
+            if self.dtype.kind == "f":
+                # Exclude 'np.inf', '-np.inf'
+                s = cudf.Series(self)
+                # TODO: replace np.inf with cudf scalar when
+                # https://github.com/rapidsai/cudf/pull/6297 merges
+                non_infs = s[~((s == np.inf) | (s == -np.inf))]
+                col = non_infs._column
             else:
-                # Kinds are the same but to_dtype is smaller
-                if "float" in to_dtype.name:
-                    finfo = np.finfo(to_dtype)
-                    lower_, upper_ = finfo.min, finfo.max
-                elif "int" in to_dtype.name:
-                    iinfo = np.iinfo(to_dtype)
-                    lower_, upper_ = iinfo.min, iinfo.max
+                col = self
 
-                if self.dtype.kind == "f":
-                    # Exclude 'np.inf', '-np.inf'
-                    s = cudf.Series(self)
-                    # TODO: replace np.inf with cudf scalar when
-                    # https://github.com/rapidsai/cudf/pull/6297 merges
-                    non_infs = s[~((s == np.inf) | (s == -np.inf))]
-                    col = non_infs._column
-                else:
-                    col = self
-
-                min_ = col.min()
+            min_ = col.min()
                 # TODO: depending on implementation of cudf scalar and future
                 # refactor of min/max, change the test method
-                if np.isnan(min_):
-                    # Column contains only infs
-                    return True
-
-                return (min_ >= lower_) and (col.max() < upper_)
-
-        # want to cast int to uint
+            return True if np.isnan(min_) else (min_ >= lower_) and (col.max() < upper_)
         elif self.dtype.kind == "i" and to_dtype.kind == "u":
             i_max_ = np.iinfo(self.dtype).max
             u_max_ = np.iinfo(to_dtype).max
@@ -668,14 +654,12 @@ class NumericalColumn(NumericalBaseColumn):
                 (i_max_ <= u_max_) or (self.max() < u_max_)
             )
 
-        # want to cast uint to int
         elif self.dtype.kind == "u" and to_dtype.kind == "i":
             u_max_ = np.iinfo(self.dtype).max
             i_max_ = np.iinfo(to_dtype).max
 
             return (u_max_ <= i_max_) or (self.max() < i_max_)
 
-        # want to cast int to float
         elif self.dtype.kind in {"i", "u"} and to_dtype.kind == "f":
             info = np.finfo(to_dtype)
             biggest_exact_int = 2 ** (info.nmant + 1)
@@ -683,26 +667,21 @@ class NumericalColumn(NumericalBaseColumn):
                 self.max() <= biggest_exact_int
             ):
                 return True
-            else:
+            filled = self.fillna(0)
+            return (
+                cudf.Series(filled).astype(to_dtype).astype(filled.dtype)
+                == cudf.Series(filled)
+            ).all()
 
-                filled = self.fillna(0)
-                return (
-                    cudf.Series(filled).astype(to_dtype).astype(filled.dtype)
-                    == cudf.Series(filled)
-                ).all()
-
-        # want to cast float to int:
         elif self.dtype.kind == "f" and to_dtype.kind in {"i", "u"}:
             iinfo = np.iinfo(to_dtype)
             min_, max_ = iinfo.min, iinfo.max
 
-            # best we can do is hope to catch it here and avoid compare
-            if (self.min() >= min_) and (self.max() <= max_):
-                filled = self.fillna(0, fill_nan=False)
-                return (cudf.Series(filled) % 1 == 0).all()
-            else:
+            if self.min() < min_ or self.max() > max_:
                 return False
 
+            filled = self.fillna(0, fill_nan=False)
+            return (cudf.Series(filled) % 1 == 0).all()
         return False
 
     def _with_type_metadata(self: ColumnBase, dtype: Dtype) -> ColumnBase:
@@ -816,7 +795,7 @@ def digitize(
     -------
     A column containing the indices
     """
-    if not column.dtype == bins.dtype:
+    if column.dtype != bins.dtype:
         raise ValueError(
             "Digitize() expects bins and input column have the same dtype."
         )

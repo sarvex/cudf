@@ -63,7 +63,7 @@ def pytest_sessionfinish(session, exitstatus):
 # Constants used to define benchmarking standards.
 if "CUDF_BENCHMARKS_DEBUG_ONLY" in os.environ:
     NUM_ROWS = [10, 20]
-    NUM_COLS = [1, 6]
 else:
     NUM_ROWS = [100, 10_000, 1_000_000]
-    NUM_COLS = [1, 6]
+
+NUM_COLS = [1, 6]

@@ -134,9 +134,7 @@ def to_numeric(arg, errors="raise", downcast=None):
                 raise e
     elif is_list_dtype(dtype) or is_struct_dtype(dtype):
         raise ValueError("Input does not support nested datatypes")
-    elif _is_non_decimal_numeric_dtype(dtype):
-        pass
-    else:
+    elif not _is_non_decimal_numeric_dtype(dtype):
         raise ValueError("Unrecognized datatype")
 
     # str->float conversion may require lower precision
@@ -157,18 +155,19 @@ def to_numeric(arg, errors="raise", downcast=None):
 
         for t in type_set:
             downcast_dtype = cudf.dtype(t)
-            if downcast_dtype.itemsize <= col.dtype.itemsize:
-                if col.can_cast_safely(downcast_dtype):
-                    col = libcudf.unary.cast(col, downcast_dtype)
-                    break
+            if (
+                downcast_dtype.itemsize <= col.dtype.itemsize
+                and col.can_cast_safely(downcast_dtype)
+            ):
+                col = libcudf.unary.cast(col, downcast_dtype)
+                break
 
     if isinstance(arg, (cudf.Series, pd.Series)):
         return cudf.Series(col)
-    else:
-        if col.has_nulls():
-            # To match pandas, always return a floating type filled with nan.
-            col = col.astype(float).fillna(np.nan)
-        return col.values
+    if col.has_nulls():
+        # To match pandas, always return a floating type filled with nan.
+        col = col.astype(float).fillna(np.nan)
+    return col.values
 
 
 def _convert_str_col(col, errors, _downcast=None):
@@ -205,24 +204,22 @@ def _convert_str_col(col, errors, _downcast=None):
 
     is_float = libstrings.is_float(col)
     if is_float.all():
-        if _downcast in {"unsigned", "signed", "integer"}:
-            warnings.warn(
-                UserWarning(
-                    "Downcasting from float to int will be "
-                    "limited by float32 precision."
-                )
-            )
-            return col.as_numerical_column(dtype=cudf.dtype("f"))
-        else:
+        if _downcast not in {"unsigned", "signed", "integer"}:
             return col.as_numerical_column(dtype=cudf.dtype("d"))
+        warnings.warn(
+            UserWarning(
+                "Downcasting from float to int will be "
+                "limited by float32 precision."
+            )
+        )
+        return col.as_numerical_column(dtype=cudf.dtype("f"))
+    elif errors == "coerce":
+        col = libcudf.string_casting.stod(col)
+        non_numerics = is_float.unary_operator("not")
+        col[non_numerics] = None
+        return col
     else:
-        if errors == "coerce":
-            col = libcudf.string_casting.stod(col)
-            non_numerics = is_float.unary_operator("not")
-            col[non_numerics] = None
-            return col
-        else:
-            raise ValueError("Unable to convert some strings to numerics.")
+        raise ValueError("Unable to convert some strings to numerics.")
 
 
 def _proc_inf_empty_strings(col):

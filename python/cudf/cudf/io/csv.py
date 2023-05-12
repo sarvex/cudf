@@ -129,15 +129,12 @@ def read_csv(
             for name in df._column_names
             if name not in dtype
         }
-        default_dtypes = {}
-
-        for name, dt in unspecified_dtypes.items():
-            if dt == np.dtype("i1"):
-                # csv reader reads all null column as int8.
-                # The dtype should remain int8.
-                default_dtypes[name] = dt
-            else:
-                default_dtypes[name] = _maybe_convert_to_default_type(dt)
+        default_dtypes = {
+            name: dt
+            if dt == np.dtype("i1")
+            else _maybe_convert_to_default_type(dt)
+            for name, dt in unspecified_dtypes.items()
+        }
         df = df.astype(default_dtypes)
 
     return df
@@ -219,8 +216,8 @@ def to_csv(
             if isinstance(col, cudf.core.column.CategoricalColumn):
                 df._data[col_name] = col.astype(col.categories.dtype)
 
-        if isinstance(df.index, cudf.CategoricalIndex):
-            df.index = df.index.astype(df.index.categories.dtype)
+    if isinstance(df.index, cudf.CategoricalIndex):
+        df.index = df.index.astype(df.index.categories.dtype)
 
     rows_per_chunk = chunksize if chunksize else len(df)
 

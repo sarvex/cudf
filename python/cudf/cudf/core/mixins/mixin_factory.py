@@ -68,10 +68,7 @@ class Operation:
 
         setattr(owner, self._name, retfunc)
 
-        if obj is None:
-            return getattr(owner, self._name)
-        else:
-            return getattr(obj, self._name)
+        return getattr(owner, self._name) if obj is None else getattr(obj, self._name)
 
 
 def _should_define_operation(cls, operation, base_operation_name):

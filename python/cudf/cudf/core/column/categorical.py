@@ -1228,9 +1228,7 @@ class CategoricalColumn(column.ColumnBase):
             return self
 
         if fill_value is not None:
-            fill_is_scalar = np.isscalar(fill_value)
-
-            if fill_is_scalar:
+            if fill_is_scalar := np.isscalar(fill_value):
                 if fill_value == _DEFAULT_CATEGORICAL_VALUE:
                     fill_value = self.codes.dtype.type(fill_value)
                 else:
@@ -1242,12 +1240,14 @@ class CategoricalColumn(column.ColumnBase):
                         raise ValueError(err_msg) from err
             else:
                 fill_value = column.as_column(fill_value, nan_as_null=False)
-                if isinstance(fill_value, CategoricalColumn):
-                    if self.dtype != fill_value.dtype:
-                        raise TypeError(
-                            "Cannot set a Categorical with another, "
-                            "without identical categories"
-                        )
+                if (
+                    isinstance(fill_value, CategoricalColumn)
+                    and self.dtype != fill_value.dtype
+                ):
+                    raise TypeError(
+                        "Cannot set a Categorical with another, "
+                        "without identical categories"
+                    )
                 # TODO: only required if fill_value has a subset of the
                 # categories:
                 fill_value = fill_value._set_categories(
@@ -1470,7 +1470,7 @@ class CategoricalColumn(column.ColumnBase):
             )
         else:
             out_col = self
-            if not (type(out_col.categories) is type(new_categories)):
+            if type(out_col.categories) is not type(new_categories):
                 # If both categories are of different Column types,
                 # return a column full of Nulls.
                 out_col = _create_empty_categorical_column(
@@ -1481,7 +1481,7 @@ class CategoricalColumn(column.ColumnBase):
                 )
             elif (
                 not out_col._categories_equal(new_categories, ordered=ordered)
-                or not self.ordered == ordered
+                or self.ordered != ordered
             ):
                 out_col = out_col._set_categories(
                     new_categories,
@@ -1536,9 +1536,7 @@ class CategoricalColumn(column.ColumnBase):
             )
 
         cur_codes = self.codes
-        max_cat_size = (
-            len(cur_cats) if len(cur_cats) > len(new_cats) else len(new_cats)
-        )
+        max_cat_size = max(len(cur_cats), len(new_cats))
         out_code_dtype = min_unsigned_type(max_cat_size)
 
         cur_order = column.arange(len(cur_codes))
@@ -1652,10 +1650,7 @@ def pandas_categorical_as_column(
 
     valid_codes = codes != codes.dtype.type(_DEFAULT_CATEGORICAL_VALUE)
 
-    mask = None
-    if not valid_codes.all():
-        mask = bools_to_mask(valid_codes)
-
+    mask = bools_to_mask(valid_codes) if not valid_codes.all() else None
     return column.build_categorical_column(
         categories=categorical.categories,
         codes=column.build_column(codes.base_data, codes.dtype),

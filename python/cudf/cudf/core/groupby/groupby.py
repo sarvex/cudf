@@ -416,7 +416,7 @@ class GroupBy(Serializable, Reducible, Scannable):
         """
         Return the rank of values within each group.
         """
-        if not axis == 0:
+        if axis != 0:
             raise NotImplementedError("Only axis=0 is supported.")
 
         def rank(x):
@@ -1016,15 +1016,15 @@ class GroupBy(Serializable, Reducible, Scannable):
         return group_values.iloc[indices]
 
     def serialize(self):
-        header = {}
         frames = []
 
-        header["kwargs"] = {
-            "sort": self._sort,
-            "dropna": self._dropna,
-            "as_index": self._as_index,
+        header = {
+            "kwargs": {
+                "sort": self._sort,
+                "dropna": self._dropna,
+                "as_index": self._as_index,
+            }
         }
-
         obj_header, obj_frames = self.obj.serialize()
         header["obj"] = obj_header
         header["obj_type"] = pickle.dumps(type(self.obj))
@@ -1499,7 +1499,7 @@ class GroupBy(Serializable, Reducible, Scannable):
             raise TypeError(f"type {type(function)} is not callable")
 
         _, offsets, _, grouped_values = self._grouped()
-        kwargs.update({"chunks": offsets})
+        kwargs["chunks"] = offsets
         return grouped_values.apply_chunks(function, **kwargs)
 
     @_cudf_nvtx_annotate
@@ -1721,7 +1721,7 @@ class GroupBy(Serializable, Reducible, Scannable):
             val3  0.714575  1.000000  1.000000
         """
 
-        if not method.lower() in ("pearson",):
+        if method.lower() not in ("pearson",):
             raise NotImplementedError(
                 "Only pearson correlation is currently supported"
             )
@@ -1984,7 +1984,7 @@ class GroupBy(Serializable, Reducible, Scannable):
             First differences of the Series or DataFrame.
         """
 
-        if not axis == 0:
+        if axis != 0:
             raise NotImplementedError("Only axis=0 is supported.")
 
         values = self.obj.__class__._from_data(
@@ -2115,7 +2115,7 @@ class GroupBy(Serializable, Reducible, Scannable):
             raise NotImplementedError("Does not support limit param yet.")
         if downcast is not None:
             raise NotImplementedError("Does not support downcast yet.")
-        if not axis == 0:
+        if axis != 0:
             raise NotImplementedError("Only support axis == 0.")
 
         if value is None and method is None:
@@ -2175,7 +2175,7 @@ class GroupBy(Serializable, Reducible, Scannable):
         if freq is not None:
             raise NotImplementedError("Parameter freq is unsupported.")
 
-        if not axis == 0:
+        if axis != 0:
             raise NotImplementedError("Only axis=0 is supported.")
 
         values = self.grouping.values
@@ -2220,7 +2220,7 @@ class GroupBy(Serializable, Reducible, Scannable):
         Series or DataFrame
             Percentage changes within each group
         """
-        if not axis == 0:
+        if axis != 0:
             raise NotImplementedError("Only axis=0 is supported.")
         if limit is not None:
             raise NotImplementedError("limit parameter not supported yet.")
@@ -2286,9 +2286,8 @@ class SeriesGroupBy(GroupBy):
         result = super().agg(func)
 
         # downcast the result to a Series:
-        if len(result._data):
-            if result.shape[1] == 1 and not is_list_like(func):
-                return result.iloc[:, 0]
+        if len(result._data) and result.shape[1] == 1 and not is_list_like(func):
+            return result.iloc[:, 0]
 
         # drop the first level if we have a multiindex
         if result._data.nlevels > 1:
@@ -2455,9 +2454,8 @@ class _Grouping(Serializable):
         self.names.append(None)
 
     def serialize(self):
-        header = {}
         frames = []
-        header["names"] = pickle.dumps(self.names)
+        header = {"names": pickle.dumps(self.names)}
         header["_named_columns"] = pickle.dumps(self._named_columns)
         column_header, column_frames = cudf.core.column.serialize_columns(
             self._key_columns
@@ -2487,6 +2485,4 @@ def _is_multi_agg(aggs):
     """
     if isinstance(aggs, abc.Mapping):
         return any(is_list_like(agg) for agg in aggs.values())
-    if is_list_like(aggs):
-        return True
-    return False
+    return bool(is_list_like(aggs))

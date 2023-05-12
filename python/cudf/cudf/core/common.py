@@ -25,13 +25,12 @@ def pipe(obj, func, *args, **kwargs):
     -------
     object : the return type of ``func``.
     """
-    if isinstance(func, tuple):
-        func, target = func
-        if target in kwargs:
-            raise ValueError(
-                f"{target} is both the pipe target and a keyword argument"
-            )
-        kwargs[target] = obj
-        return func(*args, **kwargs)
-    else:
+    if not isinstance(func, tuple):
         return func(obj, *args, **kwargs)
+    func, target = func
+    if target in kwargs:
+        raise ValueError(
+            f"{target} is both the pipe target and a keyword argument"
+        )
+    kwargs[target] = obj
+    return func(*args, **kwargs)

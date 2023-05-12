@@ -197,10 +197,7 @@ def read_orc_statistics(
             for i, raw_file_stats in enumerate(raw_file_statistics)
             if columns is None or column_names[i] in columns
         }
-        if any(
-            not parsed_statistics
-            for parsed_statistics in file_statistics.values()
-        ):
+        if not all(file_statistics.values()):
             continue
         else:
             files_statistics.append(file_statistics)
@@ -211,12 +208,7 @@ def read_orc_statistics(
                 for i, raw_file_stats in enumerate(raw_stripe_statistics)
                 if columns is None or column_names[i] in columns
             }
-            if any(
-                not parsed_statistics
-                for parsed_statistics in stripe_statistics.values()
-            ):
-                continue
-            else:
+            if all(stripe_statistics.values()):
                 stripes_statistics.append(stripe_statistics)
 
     return files_statistics, stripes_statistics
@@ -320,7 +312,7 @@ def read_orc(
             stripes = [stripes]
 
         # Must ensure a stripe for each source is specified, unless None
-        if not len(stripes) == len(filepath_or_buffer):
+        if len(stripes) != len(filepath_or_buffer):
             raise ValueError(
                 "A list of stripes must be provided for each input source"
             )
@@ -377,32 +369,30 @@ def read_orc(
                 timestamp_type,
             )
         )
+    def read_orc_stripe(orc_file, stripe, columns):
+        pa_table = orc_file.read_stripe(stripe, columns)
+        if isinstance(pa_table, pa.RecordBatch):
+            pa_table = pa.Table.from_batches([pa_table])
+        return pa_table
+
+    warnings.warn("Using CPU via PyArrow to read ORC dataset.")
+    if len(filepath_or_buffer) > 1:
+        raise NotImplementedError(
+            "Using CPU via PyArrow only supports a single a "
+            "single input source"
+        )
+
+    orc_file = orc.ORCFile(filepath_or_buffer[0])
+    if stripes is not None and len(stripes) > 0:
+        for stripe_source_file in stripes:
+            pa_tables = [
+                read_orc_stripe(orc_file, i, columns)
+                for i in stripe_source_file
+            ]
+            pa_table = pa.concat_tables(pa_tables)
     else:
-
-        def read_orc_stripe(orc_file, stripe, columns):
-            pa_table = orc_file.read_stripe(stripe, columns)
-            if isinstance(pa_table, pa.RecordBatch):
-                pa_table = pa.Table.from_batches([pa_table])
-            return pa_table
-
-        warnings.warn("Using CPU via PyArrow to read ORC dataset.")
-        if len(filepath_or_buffer) > 1:
-            raise NotImplementedError(
-                "Using CPU via PyArrow only supports a single a "
-                "single input source"
-            )
-
-        orc_file = orc.ORCFile(filepath_or_buffer[0])
-        if stripes is not None and len(stripes) > 0:
-            for stripe_source_file in stripes:
-                pa_tables = [
-                    read_orc_stripe(orc_file, i, columns)
-                    for i in stripe_source_file
-                ]
-                pa_table = pa.concat_tables(pa_tables)
-        else:
-            pa_table = orc_file.read(columns=columns)
-        df = cudf.DataFrame.from_arrow(pa_table)
+        pa_table = orc_file.read(columns=columns)
+    df = cudf.DataFrame.from_arrow(pa_table)
 
     return df
 

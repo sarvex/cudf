@@ -157,9 +157,7 @@ def _drop_columns(f: Frame, columns: abc.Iterable, errors: str):
         try:
             f._drop_column(c)
         except KeyError as e:
-            if errors == "ignore":
-                pass
-            else:
+            if errors != "ignore":
                 raise e
 
 
@@ -192,7 +190,7 @@ def _indices_from_labels(obj, labels):
 
 def _get_label_range_or_mask(index, start, stop, step):
     if (
-        not (start is None and stop is None)
+        (start is not None or stop is not None)
         and type(index) is cudf.core.index.DatetimeIndex
         and index.is_monotonic_increasing is False
     ):
@@ -203,12 +201,11 @@ def _get_label_range_or_mask(index, start, stop, step):
                 return slice(0, 0, None)
             # TODO: Once Index binary ops are updated to support logical_and,
             # can use that instead of using cupy.
-            boolean_mask = cp.logical_and((index >= start), (index <= stop))
+            return cp.logical_and((index >= start), (index <= stop))
         elif start is not None:
-            boolean_mask = index >= start
+            return index >= start
         else:
-            boolean_mask = index <= stop
-        return boolean_mask
+            return index <= stop
     else:
         start, stop = index.find_label_range(start, stop)
         return slice(start, stop, step)
@@ -415,17 +412,16 @@ class IndexedFrame(Frame):
                     result_col = col.nans_to_nulls()
                 except AttributeError:
                     result_col = col
+            elif col.has_nulls(include_nan=True):
+                # Workaround as find_first_value doesn't seem to work
+                # in case of bools.
+                first_index = int(
+                    col.isnull().astype("int8").find_first_value(1)
+                )
+                result_col = col.copy()
+                result_col[first_index:] = None
             else:
-                if col.has_nulls(include_nan=True):
-                    # Workaround as find_first_value doesn't seem to work
-                    # in case of bools.
-                    first_index = int(
-                        col.isnull().astype("int8").find_first_value(1)
-                    )
-                    result_col = col.copy()
-                    result_col[first_index:] = None
-                else:
-                    result_col = col
+                result_col = col
 
             if (
                 cast_to_int
@@ -518,9 +514,7 @@ class IndexedFrame(Frame):
 
     @_cudf_nvtx_annotate
     def equals(self, other):  # noqa: D102
-        if not super().equals(other):
-            return False
-        return self._index.equals(other._index)
+        return False if not super().equals(other) else self._index.equals(other._index)
 
     @property
     def index(self):
@@ -753,7 +747,7 @@ class IndexedFrame(Frame):
                 "method parameter is not implemented yet"
             )
 
-        if not (to_replace is None and value is None):
+        if to_replace is not None or value is not None:
             copy_data = {}
             (
                 all_na_per_column,
@@ -899,15 +893,10 @@ class IndexedFrame(Frame):
                 "Length of lower/upper should be equal to number of columns"
             )
 
-        if self.ndim == 1:
-            # In case of series and Index,
-            # swap lower and upper if lower > upper
-            if (
-                lower[0] is not None
-                and upper[0] is not None
-                and (lower[0] > upper[0])
-            ):
-                lower[0], upper[0] = upper[0], lower[0]
+        if self.ndim == 1 and (
+            lower[0] is not None and upper[0] is not None and (lower[0] > upper[0])
+        ):
+            lower[0], upper[0] = upper[0], lower[0]
 
         data = {
             name: col.clip(lower[i], upper[i])
@@ -1795,7 +1784,7 @@ class IndexedFrame(Frame):
         """
         subset = self._preprocess_subset(subset)
         subset_cols = [name for name in self._column_names if name in subset]
-        if len(subset_cols) == 0:
+        if not subset_cols:
             return self.copy(deep=True)
 
         keys = self._positions_from_column_names(
@@ -2200,9 +2189,7 @@ class IndexedFrame(Frame):
         col = _post_process_output_col(ans_col, retty)
 
         col.set_base_mask(libcudf.transform.bools_to_mask(ans_mask))
-        result = cudf.Series._from_data({None: col}, self._index)
-
-        return result
+        return cudf.Series._from_data({None: col}, self._index)
 
     def sort_values(
         self,
@@ -2294,9 +2281,7 @@ class IndexedFrame(Frame):
             return self
 
         if keep == "first":
-            if n < 0:
-                n = 0
-
+            n = max(n, 0)
             # argsort the `by` column
             return self._gather(
                 self._get_columns_by_label(columns)
@@ -2332,9 +2317,10 @@ class IndexedFrame(Frame):
 
         if self.index.equals(index):
             return self
-        if not allow_non_unique:
-            if not self.index.is_unique or not index.is_unique:
-                raise ValueError("Cannot align indices with non-unique values")
+        if not allow_non_unique and (
+            not self.index.is_unique or not index.is_unique
+        ):
+            raise ValueError("Cannot align indices with non-unique values")
 
         lhs = cudf.DataFrame._from_data(self._data, index=self.index)
         rhs = cudf.DataFrame._from_data({}, index=index)
@@ -2348,7 +2334,7 @@ class IndexedFrame(Frame):
             rhs[sort_col_id] = cudf.core.column.arange(len(rhs))
 
         result = lhs.join(rhs, how=how, sort=sort)
-        if how in ("left", "right"):
+        if how in {"left", "right"}:
             result = result.sort_values(sort_col_id)
             del result[sort_col_id]
 
@@ -3282,15 +3268,14 @@ class IndexedFrame(Frame):
             return self._sample_axis_0(
                 n, weights, replace, random_state, ignore_index
             )
-        else:
-            if isinstance(random_state, cp.random.RandomState):
-                raise ValueError(
-                    "Sampling from `axis=1`/`columns` with cupy random state"
-                    "isn't supported."
-                )
-            return self._sample_axis_1(
-                n, weights, replace, random_state, ignore_index
+        if isinstance(random_state, cp.random.RandomState):
+            raise ValueError(
+                "Sampling from `axis=1`/`columns` with cupy random state"
+                "isn't supported."
             )
+        return self._sample_axis_1(
+            n, weights, replace, random_state, ignore_index
+        )
 
     def _sample_axis_0(
         self,
@@ -3383,9 +3368,7 @@ class IndexedFrame(Frame):
                     ret = ret.astype(bool)
             return ret
 
-        # Attempt to dispatch all other functions to cupy.
-        cupy_func = getattr(cp, fname)
-        if cupy_func:
+        if cupy_func := getattr(cp, fname):
             if ufunc.nin == 2:
                 other = inputs[self is inputs[0]]
                 inputs, index = self._make_operands_and_index_for_binop(
@@ -3496,11 +3479,7 @@ class IndexedFrame(Frame):
                 "verify_integrity parameter is not supported yet."
             )
 
-        if is_list_like(other):
-            to_concat = [self, *other]
-        else:
-            to_concat = [self, other]
-
+        to_concat = [self, *other] if is_list_like(other) else [self, other]
         return cudf.concat(to_concat, ignore_index=ignore_index, sort=sort)
 
     def astype(self, dtype, copy=False, errors="raise", **kwargs):
@@ -3814,11 +3793,7 @@ class IndexedFrame(Frame):
                 "'index' or 'columns'"
             )
 
-        if inplace:
-            out = self
-        else:
-            out = self.copy()
-
+        out = self if inplace else self.copy()
         if axis in (1, "columns"):
             target = _get_host_unique(target)
 
@@ -4899,8 +4874,9 @@ def _check_duplicate_level_names(specified, level_names):
         return
     duplicates = {key for key, val in Counter(level_names).items() if val > 1}
 
-    duplicates_specified = [spec for spec in specified if spec in duplicates]
-    if not len(duplicates_specified) == 0:
+    if duplicates_specified := [
+        spec for spec in specified if spec in duplicates
+    ]:
         # Note: pandas raises first encountered duplicates, cuDF raises all.
         raise ValueError(
             f"The names {duplicates_specified} occurs multiple times, use a"
@@ -4965,11 +4941,10 @@ def _get_replacement_values_for_columns(
                     f"of same length."
                     f" Expected {len(to_replace)}, got {len(value)}."
                 )
-            else:
-                to_replace_columns = {
-                    col: to_replace for col in columns_dtype_map
-                }
-                values_columns = {col: value for col in columns_dtype_map}
+            to_replace_columns = {
+                col: to_replace for col in columns_dtype_map
+            }
+            values_columns = {col: value for col in columns_dtype_map}
         elif cudf.utils.dtypes.is_column_like(value):
             to_replace_columns = {col: to_replace for col in columns_dtype_map}
             values_columns = {col: value for col in columns_dtype_map}
@@ -5103,11 +5078,7 @@ def _drop_rows_by_labels(
         if errors == "raise" and not labels.isin(levels_index).all():
             raise KeyError("One or more values not found in axis")
 
-        if isinstance(level, int):
-            ilevel = level
-        else:
-            ilevel = obj._index.names.index(level)
-
+        ilevel = level if isinstance(level, int) else obj._index.names.index(level)
         # 1. Merge Index df and data df along column axis:
         # | id | ._index df | data column(s) |
         idx_nlv = obj._index.nlevels
@@ -5152,7 +5123,6 @@ def _drop_rows_by_labels(
         key_df = cudf.DataFrame(index=labels)
         if isinstance(obj, cudf.DataFrame):
             return obj.join(key_df, how="leftanti")
-        else:
-            res = obj.to_frame(name="tmp").join(key_df, how="leftanti")["tmp"]
-            res.name = obj.name
-            return res
+        res = obj.to_frame(name="tmp").join(key_df, how="leftanti")["tmp"]
+        res.name = obj.name
+        return res

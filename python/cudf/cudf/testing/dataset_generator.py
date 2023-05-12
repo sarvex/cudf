@@ -99,92 +99,7 @@ def _generate_column(column_params, num_rows):
     # If cardinality is specified, we create a set to sample from.
     # Otherwise, we simply use the given generator to generate each value.
 
-    if column_params.cardinality is not None:
-        # Construct set of values to sample from where
-        # set size = cardinality
-
-        if (
-            isinstance(column_params.dtype, str)
-            and column_params.dtype == "category"
-        ):
-            vals = pa.array(
-                column_params.generator,
-                size=column_params.cardinality,
-                safe=False,
-            )
-            return pa.DictionaryArray.from_arrays(
-                dictionary=vals,
-                indices=np.random.randint(
-                    low=0, high=len(vals), size=num_rows
-                ),
-                mask=np.random.choice(
-                    [True, False],
-                    size=num_rows,
-                    p=[
-                        column_params.null_frequency,
-                        1 - column_params.null_frequency,
-                    ],
-                )
-                if column_params.null_frequency > 0.0
-                else None,
-            )
-
-        if hasattr(column_params.dtype, "to_arrow"):
-            arrow_type = column_params.dtype.to_arrow()
-        elif column_params.dtype is not None:
-            arrow_type = np_to_pa_dtype(cudf.dtype(column_params.dtype))
-        else:
-            arrow_type = None
-
-        if isinstance(column_params.dtype, cudf.StructDtype):
-            vals = pa.StructArray.from_arrays(
-                column_params.generator,
-                names=column_params.dtype.fields.keys(),
-                mask=pa.array(
-                    np.random.choice(
-                        [True, False],
-                        size=num_rows,
-                        p=[
-                            column_params.null_frequency,
-                            1 - column_params.null_frequency,
-                        ],
-                    )
-                )
-                if column_params.null_frequency > 0.0
-                else None,
-            )
-            return vals
-        elif not isinstance(arrow_type, pa.lib.Decimal128Type):
-            vals = pa.array(
-                column_params.generator,
-                size=column_params.cardinality,
-                safe=False,
-                type=arrow_type,
-            )
-        vals = pa.array(
-            np.random.choice(column_params.generator, size=num_rows)
-            if isinstance(arrow_type, pa.lib.Decimal128Type)
-            else np.random.choice(vals, size=num_rows),
-            mask=np.random.choice(
-                [True, False],
-                size=num_rows,
-                p=[
-                    column_params.null_frequency,
-                    1 - column_params.null_frequency,
-                ],
-            )
-            if column_params.null_frequency > 0.0
-            else None,
-            size=num_rows,
-            safe=False,
-            type=None
-            if isinstance(arrow_type, pa.lib.Decimal128Type)
-            else arrow_type,
-        )
-        if isinstance(arrow_type, pa.lib.Decimal128Type):
-            vals = vals.cast(arrow_type, safe=False)
-        return vals
-    else:
+    if column_params.cardinality is None:
         # Generate data for current column
         return pa.array(
             column_params.generator,
@@ -201,6 +116,90 @@ def _generate_column(column_params, num_rows):
             size=num_rows,
             safe=False,
         )
+    # Construct set of values to sample from where
+    # set size = cardinality
+
+    if (
+        isinstance(column_params.dtype, str)
+        and column_params.dtype == "category"
+    ):
+        vals = pa.array(
+            column_params.generator,
+            size=column_params.cardinality,
+            safe=False,
+        )
+        return pa.DictionaryArray.from_arrays(
+            dictionary=vals,
+            indices=np.random.randint(
+                low=0, high=len(vals), size=num_rows
+            ),
+            mask=np.random.choice(
+                [True, False],
+                size=num_rows,
+                p=[
+                    column_params.null_frequency,
+                    1 - column_params.null_frequency,
+                ],
+            )
+            if column_params.null_frequency > 0.0
+            else None,
+        )
+
+    if hasattr(column_params.dtype, "to_arrow"):
+        arrow_type = column_params.dtype.to_arrow()
+    elif column_params.dtype is not None:
+        arrow_type = np_to_pa_dtype(cudf.dtype(column_params.dtype))
+    else:
+        arrow_type = None
+
+    if isinstance(column_params.dtype, cudf.StructDtype):
+        vals = pa.StructArray.from_arrays(
+            column_params.generator,
+            names=column_params.dtype.fields.keys(),
+            mask=pa.array(
+                np.random.choice(
+                    [True, False],
+                    size=num_rows,
+                    p=[
+                        column_params.null_frequency,
+                        1 - column_params.null_frequency,
+                    ],
+                )
+            )
+            if column_params.null_frequency > 0.0
+            else None,
+        )
+        return vals
+    elif not isinstance(arrow_type, pa.lib.Decimal128Type):
+        vals = pa.array(
+            column_params.generator,
+            size=column_params.cardinality,
+            safe=False,
+            type=arrow_type,
+        )
+    vals = pa.array(
+        np.random.choice(column_params.generator, size=num_rows)
+        if isinstance(arrow_type, pa.lib.Decimal128Type)
+        else np.random.choice(vals, size=num_rows),
+        mask=np.random.choice(
+            [True, False],
+            size=num_rows,
+            p=[
+                column_params.null_frequency,
+                1 - column_params.null_frequency,
+            ],
+        )
+        if column_params.null_frequency > 0.0
+        else None,
+        size=num_rows,
+        safe=False,
+        type=None
+        if isinstance(arrow_type, pa.lib.Decimal128Type)
+        else arrow_type,
+    )
+    if isinstance(arrow_type, pa.lib.Decimal128Type):
+        vals = vals.cast(arrow_type, safe=False)
+    return vals
 
 
 def generate(
@@ -236,14 +235,12 @@ def get_dataframe(parameters, use_threads):
 
     # For each column, use a generic Mimesis producer to create an Iterable
     # for generating data
-    for i, column_params in enumerate(parameters.column_parameters):
-        if column_params.dtype is None:
-            column_params.generator = column_params.generator(
-                Generic("en", seed=parameters.seed)
-            )
-        else:
-            column_params.generator = column_params.generator()
-
+    for column_params in parameters.column_parameters:
+        column_params.generator = (
+            column_params.generator(Generic("en", seed=parameters.seed))
+            if column_params.dtype is None
+            else column_params.generator()
+        )
     # Get schema for each column
     table_fields = []
     for i, column_params in enumerate(parameters.column_parameters):
@@ -294,7 +291,7 @@ def get_dataframe(parameters, use_threads):
             _generate_column,
             [
                 (column_params, parameters.num_rows)
-                for i, column_params in enumerate(parameters.column_parameters)
+                for column_params in parameters.column_parameters
             ],
         )
         pool.close()
@@ -562,7 +559,7 @@ def rand_dataframe(
             # https://github.com/rapidsai/cudf/pull/6075
             # is merged.
 
-    df = get_dataframe(
+    return get_dataframe(
         Parameters(
             num_rows=rows,
             column_parameters=column_params,
@@ -570,8 +567,6 @@ def rand_dataframe(
         ),
         use_threads=use_threads,
     )
-
-    return df
 
 
 def int_generator(dtype, size, min_bound=None, max_bound=None):
@@ -672,11 +667,7 @@ def get_values_for_nested_data(dtype, lists_max_length=None, size=None):
     """
     Returns list of values based on dtype.
     """
-    if size is None:
-        cardinality = np.random.randint(0, lists_max_length)
-    else:
-        cardinality = size
-
+    cardinality = np.random.randint(0, lists_max_length) if size is None else size
     dtype = cudf.dtype(dtype)
     if dtype.kind in ("i", "u"):
         values = int_generator(dtype=dtype, size=cardinality)()
@@ -714,7 +705,7 @@ def make_lists(dtype, lists_max_length, nesting_depth, top_level_list):
     nesting_depth -= 1
     if nesting_depth >= 0:
         L = np.random.randint(1, lists_max_length)
-        for i in range(L):
+        for _ in range(L):
             top_level_list.append(
                 make_lists(
                     dtype=dtype,
@@ -838,12 +829,12 @@ def struct_generator(dtype, cardinality, size, max_null_frequency):
 def create_nested_struct_type(max_types_at_each_level, nesting_level):
     dtypes_list = cudf.utils.dtypes.ALL_TYPES
     picked_types = np.random.choice(list(dtypes_list), max_types_at_each_level)
-    type_dict = {}
-    for name, type_ in enumerate(picked_types):
-        if type_ == "struct":
-            type_dict[str(name)] = create_nested_struct_type(
-                max_types_at_each_level, nesting_level - 1
-            )
-        else:
-            type_dict[str(name)] = cudf.dtype(type_)
+    type_dict = {
+        str(name): create_nested_struct_type(
+            max_types_at_each_level, nesting_level - 1
+        )
+        if type_ == "struct"
+        else cudf.dtype(type_)
+        for name, type_ in enumerate(picked_types)
+    }
     return cudf.StructDtype(type_dict)

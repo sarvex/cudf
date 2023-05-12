@@ -16,7 +16,7 @@ datasets = {
 
 
 def delete_dir(path):
-    if path == "/" or path == "~":
+    if path in ["/", "~"]:
         raise ValueError("Trying to delete root/home directory")
 
     shutil.rmtree(path, ignore_errors=True)
@@ -32,10 +32,8 @@ def fetch_datasets(urls, dirs):
         delete_dir(path)
         os.mkdir(path)
 
-        os.system("wget " + url + " -P " + tmp_path)
-        os.system(
-            "unzip " + tmp_path + "/" + url.split("/")[-1] + " -d " + path
-        )
+        os.system(f"wget {url} -P {tmp_path}")
+        os.system(f"unzip {tmp_path}/" + url.split("/")[-1] + " -d " + path)
 
     delete_dir(tmp_path)
 
@@ -83,7 +81,7 @@ if args.datasets:
 if len(dirs) != len(set(dirs)):
     raise ValueError("Duplicate destination paths are provided")
 
-if len(urls) == 0:
+if not urls:
     for _, val in datasets.items():
         urls.append(val.url)
         dirs.append(val.dir)

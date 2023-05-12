@@ -40,15 +40,14 @@ class _Resampler(GroupBy):
 
     def agg(self, func):
         result = super().agg(func)
-        if len(self.grouping.bin_labels) != len(result):
-            index = cudf.core.index.Index(
-                self.grouping.bin_labels, name=self.grouping.names[0]
-            )
-            return result._align_to_index(
-                index, how="right", sort=False, allow_non_unique=True
-            )
-        else:
+        if len(self.grouping.bin_labels) == len(result):
             return result.sort_index()
+        index = cudf.core.index.Index(
+            self.grouping.bin_labels, name=self.grouping.names[0]
+        )
+        return result._align_to_index(
+            index, how="right", sort=False, allow_non_unique=True
+        )
 
     def asfreq(self):
         return self.obj._align_to_index(
@@ -131,7 +130,7 @@ class _ResampleGrouping(_Grouping):
         elif by.level:
             self._handle_level(by.level)
 
-        if not len(self._key_columns) == 1:
+        if len(self._key_columns) != 1:
             raise ValueError("Must resample on exactly one column")
 
         key_column = self._key_columns[0]
@@ -195,11 +194,7 @@ class _ResampleGrouping(_Grouping):
             right_inclusive=(closed == "right"),
         )
 
-        if label == "right":
-            bin_labels = bin_labels[1:]
-        else:
-            bin_labels = bin_labels[:-1]
-
+        bin_labels = bin_labels[1:] if label == "right" else bin_labels[:-1]
         # if we have more labels than bins, remove the extras labels:
         nbins = bin_numbers.max() + 1
         if len(bin_labels) > nbins:
@@ -329,25 +324,10 @@ def _adjust_dates_anchored(
     loffset = (last.value - origin_nanos) % freq.nanos
 
     if closed == "right":
-        if foffset > 0:
-            # roll back
-            fresult = first.value - foffset
-        else:
-            fresult = first.value - freq.nanos
-
-        if loffset > 0:
-            # roll forward
-            lresult = last.value + (freq.nanos - loffset)
-        else:
-            # already the end of the road
-            lresult = last.value
+        fresult = first.value - foffset if foffset > 0 else first.value - freq.nanos
+        lresult = last.value + (freq.nanos - loffset) if loffset > 0 else last.value
     else:  # closed == 'left'
-        if foffset > 0:
-            fresult = first.value - foffset
-        else:
-            # start of the road
-            fresult = first.value
-
+        fresult = first.value - foffset if foffset > 0 else first.value
         if loffset > 0:
             # roll forward
             lresult = last.value + (freq.nanos - loffset)

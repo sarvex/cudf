@@ -132,27 +132,25 @@ def cut(
                 "Bin labels must either be False, None or passed in as a "
                 "list-like argument"
             )
-        if ordered and labels is not None:
-            if len(set(labels)) != len(labels):
-                raise ValueError(
-                    "labels must be unique if ordered=True;"
-                    "pass ordered=False for duplicate labels"
-                )
+        if ordered and labels is not None and len(set(labels)) != len(labels):
+            raise ValueError(
+                "labels must be unique if ordered=True;"
+                "pass ordered=False for duplicate labels"
+            )
 
     # bins can either be an int, sequence of scalars or an intervalIndex
     if isinstance(bins, abc.Sequence):
         if len(set(bins)) is not len(bins):
-            if duplicates == "raise":
+            if duplicates == "drop":
+                # get unique values but maintain list dtype
+                bins = list(dict.fromkeys(bins))
+
+            elif duplicates == "raise":
                 raise ValueError(
                     f"Bin edges must be unique: {repr(bins)}.\n"
                     f"You can drop duplicate edges by setting the 'duplicates'"
                     "kwarg"
                 )
-            elif duplicates == "drop":
-                # get unique values but maintain list dtype
-                bins = list(dict.fromkeys(bins))
-
-    # if bins is an intervalIndex we ignore the value of right
     elif isinstance(bins, (pd.IntervalIndex, cudf.IntervalIndex)):
         right = bins.closed == "right"
 
@@ -267,20 +265,20 @@ def cut(
             # always returns a float64 dtype
             indx_arr_series = cudf.Series(index_labels, dtype="float64")
             # if retbins we return the bins as well
-            if retbins:
-                return indx_arr_series, bins
-            else:
-                return indx_arr_series
+            return (indx_arr_series, bins) if retbins else indx_arr_series
         elif retbins:
             return index_labels.values, bins
         else:
             return index_labels.values
 
-    if labels is not None:
-        if labels is not ordered and len(set(labels)) != len(labels):
-            # when we have duplicate labels and ordered is False, we
-            # should allow duplicate categories.
-            return interval_labels[index_labels]
+    if (
+        labels is not None
+        and labels is not ordered
+        and len(set(labels)) != len(labels)
+    ):
+        # when we have duplicate labels and ordered is False, we
+        # should allow duplicate categories.
+        return interval_labels[index_labels]
 
     col = build_categorical_column(
         categories=interval_labels,
@@ -297,10 +295,7 @@ def cut(
     if isinstance(orig_x, (pd.Series, cudf.Series)):
         # if we have a series input we return a series output
         res_series = cudf.Series(categorical_index, index=orig_x.index)
-        if retbins:
-            return res_series, bins
-        else:
-            return res_series
+        return (res_series, bins) if retbins else res_series
     elif retbins:
         # if retbins is true we return the bins as well
         return categorical_index, bins

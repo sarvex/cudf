@@ -83,17 +83,16 @@ def _format_error_string(err):
 def _type_to_masked_type(t):
     if isinstance(t, SUPPORTED_NUMBA_TYPES):
         return t
-    else:
-        # Unsupported Dtype. Numba tends to print out the type info
-        # for whatever operands and operation failed to type and then
-        # output its own error message. Putting the message in the repr
-        # then is one way of getting the true cause to the user
-        err = _format_error_string(
-            "Unsupported MaskedType. This is usually caused by "
-            "attempting to use a column of unsupported dtype in a UDF. "
-            f"Supported dtypes are:\n{supported_type_str}"
-        )
-        return types.Poison(err)
+    # Unsupported Dtype. Numba tends to print out the type info
+    # for whatever operands and operation failed to type and then
+    # output its own error message. Putting the message in the repr
+    # then is one way of getting the true cause to the user
+    err = _format_error_string(
+        "Unsupported MaskedType. This is usually caused by "
+        "attempting to use a column of unsupported dtype in a UDF. "
+        f"Supported dtypes are:\n{supported_type_str}"
+    )
+    return types.Poison(err)
 
 
 # Masked scalars of all types
@@ -156,11 +155,7 @@ class MaskedType(types.Type):
         # scalar, unify between the MaskedType's value_type
         # and that other thing
         unified = context.unify_pairs(self.value_type, other)
-        if unified is None:
-            # The value types don't unify, so there is no unified masked type
-            return None
-
-        return MaskedType(unified)
+        return None if unified is None else MaskedType(unified)
 
     def __eq__(self, other):
         # Equality is required for determining whether a cast is required

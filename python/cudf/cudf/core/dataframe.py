@@ -183,10 +183,10 @@ class _DataFrameIndexer(_FrameIndexer):
         if ncols == 1:
             if type(arg[1]) is slice:
                 return False
-            if isinstance(arg[1], tuple):
-                # Multiindex indexing with a slice
-                if any(isinstance(v, slice) for v in arg):
-                    return False
+            if isinstance(arg[1], tuple) and any(
+                isinstance(v, slice) for v in arg
+            ):
+                return False
             if not (is_list_like(arg[1]) or is_column_like(arg[1])):
                 return True
         return False
@@ -214,18 +214,16 @@ class _DataFrameIndexer(_FrameIndexer):
         else:
             raise ValueError("Cannot downcast DataFrame selection to Series")
 
-        # take series along the axis:
         if axis == 1:
             return df[df._data.names[0]]
-        else:
-            if df._num_columns > 0:
-                dtypes = df.dtypes.values.tolist()
-                normalized_dtype = np.result_type(*dtypes)
-                for name, col in df._data.items():
-                    df[name] = col.astype(normalized_dtype)
+        if df._num_columns > 0:
+            dtypes = df.dtypes.values.tolist()
+            normalized_dtype = np.result_type(*dtypes)
+            for name, col in df._data.items():
+                df[name] = col.astype(normalized_dtype)
 
-            sr = df.T
-            return sr[sr._data.names[0]]
+        sr = df.T
+        return sr[sr._data.names[0]]
 
 
 class _DataFrameLocIndexer(_DataFrameIndexer):
@@ -265,43 +263,43 @@ class _DataFrameLocIndexer(_DataFrameIndexer):
                 else:
                     row_arg = arg
                 return columns_df.index._get_row_major(columns_df, row_arg)
+        elif isinstance(arg[0], slice):
+            out = _get_label_range_or_mask(
+                columns_df.index, arg[0].start, arg[0].stop, arg[0].step
+            )
+            df = (
+                columns_df._slice(out)
+                if isinstance(out, slice)
+                else columns_df._apply_boolean_mask(out)
+            )
         else:
-            if isinstance(arg[0], slice):
-                out = _get_label_range_or_mask(
-                    columns_df.index, arg[0].start, arg[0].stop, arg[0].step
-                )
-                if isinstance(out, slice):
-                    df = columns_df._slice(out)
-                else:
-                    df = columns_df._apply_boolean_mask(out)
-            else:
-                tmp_arg = arg
-                if is_scalar(arg[0]):
-                    # If a scalar, there is possibility of having duplicates.
-                    # Join would get all the duplicates. So, converting it to
-                    # an array kind.
-                    tmp_arg = ([tmp_arg[0]], tmp_arg[1])
-                if len(tmp_arg[0]) == 0:
-                    return columns_df._empty_like(keep_index=True)
-                tmp_arg = (as_column(tmp_arg[0]), tmp_arg[1])
+            tmp_arg = arg
+            if is_scalar(arg[0]):
+                # If a scalar, there is possibility of having duplicates.
+                # Join would get all the duplicates. So, converting it to
+                # an array kind.
+                tmp_arg = ([tmp_arg[0]], tmp_arg[1])
+            if len(tmp_arg[0]) == 0:
+                return columns_df._empty_like(keep_index=True)
+            tmp_arg = (as_column(tmp_arg[0]), tmp_arg[1])
 
-                if is_bool_dtype(tmp_arg[0]):
-                    df = columns_df._apply_boolean_mask(tmp_arg[0])
-                else:
-                    tmp_col_name = str(uuid4())
-                    other_df = DataFrame(
-                        {tmp_col_name: column.arange(len(tmp_arg[0]))},
-                        index=as_index(tmp_arg[0]),
-                    )
-                    df = other_df.join(columns_df, how="inner")
-                    # as join is not assigning any names to index,
-                    # update it over here
-                    df.index.name = columns_df.index.name
-                    df = df.sort_values(tmp_col_name)
-                    df.drop(columns=[tmp_col_name], inplace=True)
-                    # There were no indices found
-                    if len(df) == 0:
-                        raise KeyError(arg)
+            if is_bool_dtype(tmp_arg[0]):
+                df = columns_df._apply_boolean_mask(tmp_arg[0])
+            else:
+                tmp_col_name = str(uuid4())
+                other_df = DataFrame(
+                    {tmp_col_name: column.arange(len(tmp_arg[0]))},
+                    index=as_index(tmp_arg[0]),
+                )
+                df = other_df.join(columns_df, how="inner")
+                # as join is not assigning any names to index,
+                # update it over here
+                df.index.name = columns_df.index.name
+                df = df.sort_values(tmp_col_name)
+                df.drop(columns=[tmp_col_name], inplace=True)
+                # There were no indices found
+                if len(df) == 0:
+                    raise KeyError(arg)
 
         # Step 3: Downcast
         if self._can_downcast_to_series(df, arg):
@@ -373,29 +371,19 @@ class _DataFrameLocIndexer(_DataFrameIndexer):
                     if value.shape[1] == 1:
                         if value.shape[0] != indexed_shape[0]:
                             _shape_mismatch_error(value.shape, indexed_shape)
-                        for i, col in enumerate(columns_df._column_names):
+                        for col in columns_df._column_names:
                             self._frame[col].loc[key[0]] = value[:, 0]
                     else:
                         if value.shape != indexed_shape:
                             _shape_mismatch_error(value.shape, indexed_shape)
                         for i, col in enumerate(columns_df._column_names):
                             self._frame[col].loc[key[0]] = value[:, i]
+                elif is_scalar(key[1]):
+                    for col in columns_df._column_names:
+                        self._frame[col].loc[key[0]] = value
                 else:
-                    # handle cases where value is 1d object:
-                    # If the key on column axis is a scalar, we indexed
-                    # a single column; The 1d value should assign along
-                    # the columns.
-                    if is_scalar(key[1]):
-                        for col in columns_df._column_names:
-                            self._frame[col].loc[key[0]] = value
-                    # Otherwise, there are two situations. The key on row axis
-                    # can be a scalar or 1d. In either of the situation, the
-                    # ith element in value corresponds to the ith row in
-                    # the indexed object.
-                    # If the key is 1d, a broadcast will happen.
-                    else:
-                        for i, col in enumerate(columns_df._column_names):
-                            self._frame[col].loc[key[0]] = value[i]
+                    for i, col in enumerate(columns_df._column_names):
+                        self._frame[col].loc[key[0]] = value[i]
 
 
 class _DataFrameIlocIndexer(_DataFrameIndexer):
@@ -423,23 +411,25 @@ class _DataFrameIlocIndexer(_DataFrameIndexer):
             ):
                 # Pandas returns a numpy scalar in this case
                 return df.iloc[0]
-            if self._can_downcast_to_series(df, arg):
-                return self._downcast_to_series(df, arg)
-            return df
-        else:
-            if isinstance(arg[0], slice):
-                df = columns_df._slice(arg[0])
-            elif is_scalar(arg[0]):
-                index = arg[0]
-                if index < 0:
-                    index += len(columns_df)
-                df = columns_df._slice(slice(index, index + 1, 1))
             else:
-                arg = (as_column(arg[0]), arg[1])
-                if is_bool_dtype(arg[0]):
-                    df = columns_df._apply_boolean_mask(arg[0])
-                else:
-                    df = columns_df._gather(arg[0])
+                return (
+                    self._downcast_to_series(df, arg)
+                    if self._can_downcast_to_series(df, arg)
+                    else df
+                )
+        elif isinstance(arg[0], slice):
+            df = columns_df._slice(arg[0])
+        elif is_scalar(arg[0]):
+            index = arg[0]
+            if index < 0:
+                index += len(columns_df)
+            df = columns_df._slice(slice(index, index + 1, 1))
+        else:
+            arg = (as_column(arg[0]), arg[1])
+            if is_bool_dtype(arg[0]):
+                df = columns_df._apply_boolean_mask(arg[0])
+            else:
+                df = columns_df._gather(arg[0])
 
         # Iloc Step 3:
         # Reindex
@@ -486,20 +476,19 @@ class _DataFrameIlocIndexer(_DataFrameIndexer):
                 if value.shape[1] == 1:
                     if value.shape[0] != indexed_shape[0]:
                         _shape_mismatch_error(value.shape, indexed_shape)
-                    for i, col in enumerate(columns_df._column_names):
+                    for col in columns_df._column_names:
                         self._frame[col].iloc[key[0]] = value[:, 0]
                 else:
                     if value.shape != indexed_shape:
                         _shape_mismatch_error(value.shape, indexed_shape)
                     for i, col in enumerate(columns_df._column_names):
                         self._frame._data[col][key[0]] = value[:, i]
+            elif is_scalar(key[1]):
+                for col in columns_df._column_names:
+                    self._frame[col].iloc[key[0]] = value
             else:
-                if is_scalar(key[1]):
-                    for col in columns_df._column_names:
-                        self._frame[col].iloc[key[0]] = value
-                else:
-                    for i, col in enumerate(columns_df._column_names):
-                        self._frame[col].iloc[key[0]] = value[i]
+                for i, col in enumerate(columns_df._column_names):
+                    self._frame[col].iloc[key[0]] = value[i]
 
     def _getitem_scalar(self, arg):
         col = self._frame.columns[arg[1]]
@@ -617,24 +606,21 @@ class DataFrame(IndexedFrame, Serializable, GetAttrGetItemMixin):
             if isinstance(data, pd.DataFrame):
                 data = self.from_pandas(data, nan_as_null=nan_as_null)
 
-            if index is not None:
-                if not data.index.equals(index):
-                    data = data.reindex(index)
-                    index = data._index
-                else:
-                    index = as_index(index)
-            else:
+            if index is None:
                 index = data._index
 
+            elif not data.index.equals(index):
+                data = data.reindex(index)
+                index = data._index
+            else:
+                index = as_index(index)
             self._index = index
 
+            self._data = data._data
             if columns is not None:
-                self._data = data._data
                 self._reindex(
                     column_names=columns, index=index, deep=False, inplace=True
                 )
-            else:
-                self._data = data._data
         elif isinstance(data, (cudf.Series, pd.Series)):
             if isinstance(data, pd.Series):
                 data = cudf.Series.from_pandas(data, nan_as_null=nan_as_null)
@@ -647,10 +633,7 @@ class DataFrame(IndexedFrame, Serializable, GetAttrGetItemMixin):
                 nan_as_null=nan_as_null,
             )
         elif data is None:
-            if index is None:
-                self._index = RangeIndex(0)
-            else:
-                self._index = as_index(index)
+            self._index = RangeIndex(0) if index is None else as_index(index)
             if columns is not None:
                 self._data = ColumnAccessor(
                     {
@@ -669,18 +652,18 @@ class DataFrame(IndexedFrame, Serializable, GetAttrGetItemMixin):
             arr_interface = data.__cuda_array_interface__
 
             # descr is an optional field of the _cuda_ary_iface_
-            if "descr" in arr_interface:
-                if len(arr_interface["descr"]) == 1:
-                    new_df = self._from_arrays(
-                        data, index=index, columns=columns
-                    )
-                else:
-                    new_df = self.from_records(
-                        data, index=index, columns=columns
-                    )
+            if (
+                "descr" in arr_interface
+                and len(arr_interface["descr"]) == 1
+                or "descr" not in arr_interface
+            ):
+                new_df = self._from_arrays(
+                    data, index=index, columns=columns
+                )
             else:
-                new_df = self._from_arrays(data, index=index, columns=columns)
-
+                new_df = self.from_records(
+                    data, index=index, columns=columns
+                )
             self._data = new_df._data
             self._index = new_df._index
             self._check_data_index_length_match()
@@ -713,16 +696,14 @@ class DataFrame(IndexedFrame, Serializable, GetAttrGetItemMixin):
                     self._init_from_list_like(
                         data, index=index, columns=columns
                     )
-                self._check_data_index_length_match()
-            else:
-                if not is_dict_like(data):
-                    raise TypeError("data must be list or dict-like")
-
+            elif is_dict_like(data):
                 self._init_from_dict_like(
                     data, index=index, columns=columns, nan_as_null=nan_as_null
                 )
-                self._check_data_index_length_match()
+            else:
+                raise TypeError("data must be list or dict-like")
 
+            self._check_data_index_length_match()
         if dtype:
             self._data = self.astype(dtype)._data
 
@@ -741,41 +722,16 @@ class DataFrame(IndexedFrame, Serializable, GetAttrGetItemMixin):
             data_length = len(data)
             index_length = len(index)
             if data_length != index_length:
-                # If the passed `index` length doesn't match
-                # length of Series objects in `data`, we must
-                # check if `data` can be duplicated/expanded
-                # to match the length of index. For that we
-                # check if the length of index is a factor
-                # of length of data.
-                #
-                # 1. If yes, we extend data
-                # until length of data is equal to length of index.
-                # 2. If no, we throw an error stating the
-                # shape of resulting `data` and `index`
-
-                # Simple example
-                # >>> import pandas as pd
-                # >>> s = pd.Series([1, 2, 3])
-                # >>> pd.DataFrame([s], index=['a', 'b'])
-                #    0  1  2
-                # a  1  2  3
-                # b  1  2  3
-                # >>> pd.DataFrame([s], index=['a', 'b', 'c'])
-                #    0  1  2
-                # a  1  2  3
-                # b  1  2  3
-                # c  1  2  3
-                if index_length % data_length == 0:
-                    initial_data = data
-                    data = []
-                    for _ in range(int(index_length / data_length)):
-                        data.extend([o for o in initial_data])
-                else:
+                if index_length % data_length != 0:
                     raise ValueError(
                         f"Length of values ({data_length}) does "
                         f"not match length of index ({index_length})"
                     )
 
+                initial_data = data
+                data = []
+                for _ in range(index_length // data_length):
+                    data.extend(list(initial_data))
             final_index = as_index(index)
 
         series_lengths = list(map(len, data))
@@ -837,14 +793,13 @@ class DataFrame(IndexedFrame, Serializable, GetAttrGetItemMixin):
         if len(data) > 0 and isinstance(data[0], dict):
             data = DataFrame.from_pandas(pd.DataFrame(data))
             self._data = data._data
-        # interval in a list
         elif len(data) > 0 and isinstance(data[0], pd._libs.interval.Interval):
             data = DataFrame.from_pandas(pd.DataFrame(data))
             self._data = data._data
         else:
             data = list(itertools.zip_longest(*data))
 
-            if columns is not None and len(data) == 0:
+            if columns is not None and not data:
                 data = [
                     cudf.core.column.column_empty(row_count=0, dtype=None)
                     for _ in columns
@@ -872,11 +827,7 @@ class DataFrame(IndexedFrame, Serializable, GetAttrGetItemMixin):
             keys = [key for key in data.keys() if key in columns]
             extra_cols = [col for col in columns if col not in keys]
             if keys:
-                # if keys is non-empty,
-                # add null columns for all values
-                # in `columns` that don't exist in `keys`:
-                data = {key: data[key] for key in keys}
-                data.update({key: None for key in extra_cols})
+                data = {key: data[key] for key in keys} | {key: None for key in extra_cols}
             else:
                 # If keys is empty, none of the data keys match the columns, so
                 # we need to create an empty DataFrame. To match pandas, the
@@ -953,13 +904,11 @@ class DataFrame(IndexedFrame, Serializable, GetAttrGetItemMixin):
     def _align_input_series_indices(data, index):
         data = data.copy()
 
-        input_series = [
+        if input_series := [
             Series(val)
             for val in data.values()
             if isinstance(val, (pd.Series, Series))
-        ]
-
-        if input_series:
+        ]:
             if index is not None:
                 aligned_input_series = [
                     sr._align_to_index(index, how="right", sort=False)
@@ -1191,21 +1140,18 @@ class DataFrame(IndexedFrame, Serializable, GetAttrGetItemMixin):
     def __setitem__(self, arg, value):
         """Add/set column by *arg or DataFrame*"""
         if isinstance(arg, DataFrame):
-            # not handling set_item where arg = df & value = df
             if isinstance(value, DataFrame):
                 raise TypeError(
                     f"__setitem__ with arg = {type(value)} and "
                     f"value = {type(arg)} is not supported"
                 )
-            else:
-                for col_name in self._data:
-                    scatter_map = arg._data[col_name]
-                    if is_scalar(value):
-                        self._data[col_name][scatter_map] = value
-                    else:
-                        self._data[col_name][scatter_map] = column.as_column(
-                            value
-                        )[scatter_map]
+            for col_name in self._data:
+                scatter_map = arg._data[col_name]
+                self._data[col_name][scatter_map] = (
+                    value
+                    if is_scalar(value)
+                    else column.as_column(value)[scatter_map]
+                )
         elif is_scalar(arg) or isinstance(arg, tuple):
             if isinstance(value, DataFrame):
                 _setitem_with_dataframe(
@@ -1214,43 +1160,42 @@ class DataFrame(IndexedFrame, Serializable, GetAttrGetItemMixin):
                     input_cols=[arg],
                     mask=None,
                 )
-            else:
-                if arg in self._data:
-                    if not is_scalar(value) and len(self) == 0:
-                        if isinstance(value, (pd.Series, Series)):
-                            self._index = as_index(value.index)
-                        elif len(value) > 0:
-                            self._index = RangeIndex(start=0, stop=len(value))
-                        value = column.as_column(value)
-                        new_data = self._data.__class__()
-                        for key in self._data:
-                            if key == arg:
-                                new_data[key] = value
-                            else:
-                                new_data[key] = column.column_empty_like(
-                                    self._data[key],
-                                    masked=True,
-                                    newsize=len(value),
-                                )
-
-                        self._data = new_data
-                        return
-                    elif isinstance(value, (pd.Series, Series)):
-                        value = Series(value)._align_to_index(
-                            self._index,
-                            how="right",
-                            sort=False,
-                            allow_non_unique=True,
+            elif arg in self._data:
+                if not is_scalar(value) and len(self) == 0:
+                    if isinstance(value, (pd.Series, Series)):
+                        self._index = as_index(value.index)
+                    elif len(value) > 0:
+                        self._index = RangeIndex(start=0, stop=len(value))
+                    value = column.as_column(value)
+                    new_data = self._data.__class__()
+                    for key in self._data:
+                        new_data[key] = (
+                            value
+                            if key == arg
+                            else column.column_empty_like(
+                                self._data[key],
+                                masked=True,
+                                newsize=len(value),
+                            )
                         )
-                    if is_scalar(value):
-                        self._data[arg] = column.full(len(self), value)
-                    else:
-                        value = as_column(value)
-                        self._data[arg] = value
+                    self._data = new_data
+                    return
+                elif isinstance(value, (pd.Series, Series)):
+                    value = Series(value)._align_to_index(
+                        self._index,
+                        how="right",
+                        sort=False,
+                        allow_non_unique=True,
+                    )
+                if is_scalar(value):
+                    self._data[arg] = column.full(len(self), value)
                 else:
-                    # disc. with pandas here
-                    # pandas raises key error here
-                    self.insert(len(self._data), arg, value)
+                    value = as_column(value)
+                    self._data[arg] = value
+            else:
+                # disc. with pandas here
+                # pandas raises key error here
+                self.insert(len(self._data), arg, value)
 
         elif can_convert_to_column(arg):
             mask = arg
@@ -1272,31 +1217,28 @@ class DataFrame(IndexedFrame, Serializable, GetAttrGetItemMixin):
                         value = column.as_column(value)[mask]
                     for col_name in self._data:
                         self._data[col_name][mask] = value
+            elif isinstance(value, (cupy.ndarray, np.ndarray)):
+                _setitem_with_dataframe(
+                    input_df=self,
+                    replace_df=cudf.DataFrame(value),
+                    input_cols=arg,
+                    mask=None,
+                    ignore_index=True,
+                )
+            elif isinstance(value, DataFrame):
+                _setitem_with_dataframe(
+                    input_df=self,
+                    replace_df=value,
+                    input_cols=arg,
+                    mask=None,
+                )
             else:
-                if isinstance(value, (cupy.ndarray, np.ndarray)):
-                    _setitem_with_dataframe(
-                        input_df=self,
-                        replace_df=cudf.DataFrame(value),
-                        input_cols=arg,
-                        mask=None,
-                        ignore_index=True,
+                for col in arg:
+                    self._data[col] = (
+                        column.full(size=len(self), fill_value=value)
+                        if is_scalar(value)
+                        else column.as_column(value)
                     )
-                elif isinstance(value, DataFrame):
-                    _setitem_with_dataframe(
-                        input_df=self,
-                        replace_df=value,
-                        input_cols=arg,
-                        mask=None,
-                    )
-                else:
-                    for col in arg:
-                        if is_scalar(value):
-                            self._data[col] = column.full(
-                                size=len(self), fill_value=value
-                            )
-                        else:
-                            self._data[col] = column.as_column(value)
-
         else:
             raise TypeError(
                 f"__setitem__ on type {type(arg)} is not supported"
@@ -1321,7 +1263,7 @@ class DataFrame(IndexedFrame, Serializable, GetAttrGetItemMixin):
         start, stop, stride = arg.indices(num_rows)
 
         # early stop for empty cases
-        if len(range(start, stop, stride)) == 0:
+        if not range(start, stop, stride):
             columns = ColumnAccessor(
                 {
                     colname: column.column_empty_like(col, newsize=0)
@@ -1331,20 +1273,7 @@ class DataFrame(IndexedFrame, Serializable, GetAttrGetItemMixin):
                 level_names=self._data.level_names,
             )
 
-            if isinstance(self.index, MultiIndex):
-                mi_columns = ColumnAccessor(
-                    {
-                        colname: column.column_empty_like(col, newsize=0)
-                        for colname, col in self.index._data.items()
-                    }
-                )
-                return DataFrame._from_data(
-                    columns,
-                    index=MultiIndex._from_data(
-                        mi_columns, name=self.index.name
-                    ),
-                )
-            else:
+            if not isinstance(self.index, MultiIndex):
                 return DataFrame._from_data(
                     columns,
                     index=(
@@ -1361,13 +1290,24 @@ class DataFrame(IndexedFrame, Serializable, GetAttrGetItemMixin):
                     ),
                 )
 
+            mi_columns = ColumnAccessor(
+                {
+                    colname: column.column_empty_like(col, newsize=0)
+                    for colname, col in self.index._data.items()
+                }
+            )
+            return DataFrame._from_data(
+                columns,
+                index=MultiIndex._from_data(
+                    mi_columns, name=self.index.name
+                ),
+            )
         # If index type is RangeIndex, slice without materializing.
         is_range_index = isinstance(self.index, RangeIndex)
-        if is_range_index:
-            if self._num_columns == 0:
-                result = self._empty_like(keep_index=False)
-                result._index = self.index[start:stop:stride]
-                return result
+        if is_range_index and self._num_columns == 0:
+            result = self._empty_like(keep_index=False)
+            result._index = self.index[start:stop:stride]
+            return result
 
         if start < 0:
             start = start + num_rows
@@ -1375,7 +1315,7 @@ class DataFrame(IndexedFrame, Serializable, GetAttrGetItemMixin):
         # Decreasing slices that terminates at -1, such as slice(4, -1, -1),
         # has end index of 0, The check below makes sure -1 is not wrapped
         # to `-1 + num_rows`.
-        if stop < 0 and not (stride < 0 and stop == -1):
+        if stop < 0 and (stride >= 0 or stop != -1):
             stop = stop + num_rows
         stride = 1 if stride is None else stride
 
@@ -1639,7 +1579,7 @@ class DataFrame(IndexedFrame, Serializable, GetAttrGetItemMixin):
         tables = []
         for cols in columns:
             table_index = None
-            if 1 == first_data_column_position:
+            if first_data_column_position == 1:
                 table_index = cudf.core.index.as_index(cols[0])
             elif first_data_column_position > 1:
                 table_index = DataFrame._from_data(
@@ -1831,7 +1771,7 @@ class DataFrame(IndexedFrame, Serializable, GetAttrGetItemMixin):
             right_cols = 0
             upper_rows = len(self)
             lower_rows = 0
-            if len(self) > nrows and nrows > 0:
+            if len(self) > nrows > 0:
                 upper_rows = int(nrows / 2.0) + 1
                 lower_rows = upper_rows + (nrows % 2)
             if len(self._data.names) > ncols:
@@ -1910,14 +1850,12 @@ class DataFrame(IndexedFrame, Serializable, GetAttrGetItemMixin):
             elif isinstance(labels, tuple):
                 nlevels = len(labels)
             if self._data.multiindex is False or nlevels == self._data.nlevels:
-                out = self._constructor_sliced._from_data(
+                return self._constructor_sliced._from_data(
                     new_data, index=self.index, name=labels
                 )
-                return out
-        out = self.__class__._from_data(
+        return self.__class__._from_data(
             new_data, index=self.index, columns=new_data.to_pandas_index()
         )
-        return out
 
     def _make_operands_and_index_for_binop(
         self,

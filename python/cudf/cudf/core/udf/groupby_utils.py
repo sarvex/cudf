@@ -89,13 +89,10 @@ def _groupby_apply_kernel_string_from_template(frame, args):
     input_columns = ", ".join([f"input_col_{i}" for i in range(len(frame))])
     extra_args = ", ".join([f"extra_arg_{i}" for i in range(len(args))])
 
-    # Generate the initializers for each device function argument
-    initializers = []
-    for i, colname in enumerate(frame.keys()):
-        initializers.append(
-            group_initializer_template.format(idx=i, name=colname)
-        )
-
+    initializers = [
+        group_initializer_template.format(idx=i, name=colname)
+        for i, colname in enumerate(frame.keys())
+    ]
     return groupby_apply_kernel_template.format(
         input_columns=input_columns,
         extra_args=extra_args,
@@ -181,11 +178,7 @@ def jit_groupby_apply(offsets, grouped_values, function, *args):
     else:
         blocklim = ((max_group_size + 32 - 1) // 32) * 32
 
-    if kernel.specialized:
-        specialized = kernel
-    else:
-        specialized = kernel.specialize(*launch_args)
-
+    specialized = kernel if kernel.specialized else kernel.specialize(*launch_args)
     # Ask the driver to give a good config
     ctx = get_context()
     # Dispatcher is specialized, so there's only one definition - get

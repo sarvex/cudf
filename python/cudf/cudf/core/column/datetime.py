@@ -129,7 +129,7 @@ class DatetimeColumn(column.ColumnBase):
             raise ValueError("Buffer size must be divisible by element size")
         if size is None:
             size = data.size // dtype.itemsize
-            size = size - offset
+            size -= offset
         super().__init__(
             data,
             size=size,
@@ -139,7 +139,7 @@ class DatetimeColumn(column.ColumnBase):
             null_count=null_count,
         )
 
-        if not (self.dtype.type is np.datetime64):
+        if self.dtype.type is not np.datetime64:
             raise TypeError(f"{self.dtype} is not a supported datetime type")
 
         self._time_unit, _ = np.datetime_data(self.dtype)
@@ -303,9 +303,7 @@ class DatetimeColumn(column.ColumnBase):
 
     def as_datetime_column(self, dtype: Dtype, **kwargs) -> DatetimeColumn:
         dtype = cudf.dtype(dtype)
-        if dtype == self.dtype:
-            return self
-        return libcudf.unary.cast(self, dtype=dtype)
+        return self if dtype == self.dtype else libcudf.unary.cast(self, dtype=dtype)
 
     def as_timedelta_column(
         self, dtype: Dtype, **kwargs
@@ -503,15 +501,12 @@ class DatetimeColumn(column.ColumnBase):
 
             self_delta_dtype = np.timedelta64(0, self_res).dtype
 
-            if max_dist <= np.timedelta64(max_int, to_res).astype(
+            return max_dist <= np.timedelta64(max_int, to_res).astype(
                 self_delta_dtype
             ) and min_dist <= np.timedelta64(max_int, to_res).astype(
                 self_delta_dtype
-            ):
-                return True
-            else:
-                return False
-        elif to_dtype == cudf.dtype("int64") or to_dtype == cudf.dtype("O"):
+            )
+        elif to_dtype in [cudf.dtype("int64"), cudf.dtype("O")]:
             # can safely cast to representation, or string
             return True
         else:
@@ -534,7 +529,7 @@ def infer_format(element: str, **kwargs) -> str:
     # There is possibility that the element is of following format
     # '00:00:03.333333 2016-01-01'
     second_parts = re.split(r"(\D+)", element_parts[1], maxsplit=1)
-    subsecond_fmt = ".%" + str(len(second_parts[0])) + "f"
+    subsecond_fmt = f".%{len(second_parts[0])}f"
 
     first_part = _guess_datetime_format(element_parts[0], **kwargs)
     # For the case where first_part is '00:00:03'

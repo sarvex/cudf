@@ -16,7 +16,7 @@ def get_dataset_dir():
 
 
 @pytest.mark.parametrize("skiprows", [None, 100000, 200000])
-@pytest.mark.parametrize("file_path", glob.glob(get_dataset_dir() + "avro_*"))
+@pytest.mark.parametrize("file_path", glob.glob(f"{get_dataset_dir()}avro_*"))
 def bench_avro(benchmark, file_path, use_buffer, skiprows):
 
     if use_buffer == "True":
@@ -55,7 +55,7 @@ def get_dtypes(file_path):
 
 
 @pytest.mark.parametrize("dtype", ["infer", "provide"])
-@pytest.mark.parametrize("file_path", glob.glob(get_dataset_dir() + "json_*"))
+@pytest.mark.parametrize("file_path", glob.glob(f"{get_dataset_dir()}json_*"))
 def bench_json(benchmark, file_path, use_buffer, dtype):
     if "bz2" in file_path:
         compression = "bz2"
@@ -66,11 +66,7 @@ def bench_json(benchmark, file_path, use_buffer, dtype):
     else:
         raise TypeError("Unsupported compression type")
 
-    if dtype == "infer":
-        dtype = True
-    else:
-        dtype = get_dtypes(file_path)
-
+    dtype = True if dtype == "infer" else get_dtypes(file_path)
     if use_buffer == "True":
         with open(file_path, "rb") as f:
             file_path = io.BytesIO(f.read())

@@ -56,9 +56,7 @@ def get_spillable_owner(data) -> Optional[SpillableBuffer]:
 
     if type(data) is SpillableBuffer:
         return data
-    if hasattr(data, "owner"):
-        return get_spillable_owner(data.owner)
-    return None
+    return get_spillable_owner(data.owner) if hasattr(data, "owner") else None
 
 
 def as_spillable_buffer(data, exposed: bool) -> SpillableBuffer:
@@ -487,9 +485,7 @@ class SpillableBuffer(Buffer):
         header: Dict[Any, Any]
         frames: List[Buffer | memoryview]
         with self.lock:
-            header = {}
-            header["type-serialized"] = pickle.dumps(self.__class__)
-            header["frame_count"] = 1
+            header = {"type-serialized": pickle.dumps(self.__class__), "frame_count": 1}
             if self.is_spilled:
                 frames = [self.memoryview()]
             else:
@@ -512,7 +508,7 @@ class SpillableBuffer(Buffer):
         if self._ptr_desc["type"] != "gpu":
             ptr_info = str(self._ptr_desc)
         else:
-            ptr_info = str(hex(self._ptr))
+            ptr_info = hex(self._ptr)
         return (
             f"<SpillableBuffer size={format_bytes(self._size)} "
             f"spillable={self.spillable} exposed={self.exposed} "

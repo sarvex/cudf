@@ -51,17 +51,18 @@ def parse_args():
         args.j = mp.cpu_count()
     args.ignore_compiled = re.compile(args.ignore) if args.ignore else None
     args.select_compiled = re.compile(args.select) if args.select else None
-    ret = subprocess.check_output("%s --version" % args.exe, shell=True)
+    ret = subprocess.check_output(f"{args.exe} --version", shell=True)
     ret = ret.decode("utf-8")
     version = VERSION_REGEX.search(ret)
     if version is None:
         raise Exception("Failed to figure out clang-tidy version!")
     version = version.group(1)
     if version != EXPECTED_VERSION:
-        raise Exception("clang-tidy exe must be v%s found '%s'" % \
-                        (EXPECTED_VERSION, version))
+        raise Exception(
+            f"clang-tidy exe must be v{EXPECTED_VERSION} found '{version}'"
+        )
     if not os.path.exists(args.cdb):
-        raise Exception("Compilation database '%s' missing" % args.cdb)
+        raise Exception(f"Compilation database '{args.cdb}' missing")
     return args
 
 
@@ -78,7 +79,7 @@ def get_gpu_archs(command):
         arch_flag = command[loc + 1]
         match = GPU_ARCH_REGEX.search(arch_flag)
         if match is not None:
-            archs.append("--cuda-gpu-arch=sm_%s" % match.group(1))
+            archs.append(f"--cuda-gpu-arch=sm_{match.group(1)}")
     return archs
 
 
@@ -107,7 +108,7 @@ def remove_item_plus_one(arr, item):
 def get_clang_includes(exe):
     dir = os.getenv("CONDA_PREFIX")
     if dir is None:
-        ret = subprocess.check_output("which %s 2>&1" % exe, shell=True)
+        ret = subprocess.check_output(f"which {exe} 2>&1", shell=True)
         ret = ret.decode("utf-8")
         dir = os.path.dirname(os.path.dirname(ret))
     header = os.path.join(dir, "include", "ClangHeaders")
@@ -147,10 +148,7 @@ def run_clang_tidy_command(tidy_cmd):
     result = subprocess.run(cmd, check=False, shell=True,
                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     status = result.returncode == 0
-    if status:
-        out = ""
-    else:
-        out = "CMD: " + cmd
+    out = "" if status else f"CMD: {cmd}"
     out += result.stdout.decode("utf-8").rstrip()
     return status, out
 
@@ -168,20 +166,16 @@ def run_clang_tidy(cmd, args):
         tidy_cmd.append(cmd["file"])
         ret, out1 = run_clang_tidy_command(tidy_cmd)
         out += out1
-        out += "%s" % SEPARATOR
+        out += f"{SEPARATOR}"
         if not ret:
             status = ret
         tidy_cmd[-2] = "--cuda-host-only"
-        ret, out1 = run_clang_tidy_command(tidy_cmd)
-        if not ret:
-            status = ret
-        out += out1
     else:
         tidy_cmd.append(cmd["file"])
-        ret, out1 = run_clang_tidy_command(tidy_cmd)
-        if not ret:
-            status = ret
-        out += out1
+    ret, out1 = run_clang_tidy_command(tidy_cmd)
+    if not ret:
+        status = ret
+    out += out1
     return status, out, cmd["file"]
 
 

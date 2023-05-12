@@ -114,7 +114,6 @@ class _CuDFBuffer:
                 "device": self.__dlpack_device__()[0].name,
             }
         )
-        +")"
 
 
 class _CuDFColumn:
@@ -275,7 +274,7 @@ class _CuDFColumn:
             - "mapping" : dict, Python-level only (e.g. ``{int: str}``).
                           None if not a dictionary-style categorical.
         """
-        if not self.dtype[0] == _DtypeKind.CATEGORICAL:
+        if self.dtype[0] != _DtypeKind.CATEGORICAL:
             raise TypeError(
                 "`describe_categorical only works on "
                 "a column with categorical dtype!"
@@ -286,7 +285,7 @@ class _CuDFColumn:
         # NOTE: this shows the children approach is better, transforming
         # `categories` to a "mapping" dict is inefficient
         categories = categ_col.categories
-        mapping = {ix: val for ix, val in enumerate(categories.values_host)}
+        mapping = dict(enumerate(categories.values_host))
         return ordered, is_dictionary, mapping
 
     @property
@@ -401,14 +400,23 @@ class _CuDFColumn:
         """
 
         null, invalid = self.describe_null
-        if null == 3:
-            if self.dtype[0] == _DtypeKind.CATEGORICAL:
-                valid_mask = cast(
+        if null == 0:
+            raise RuntimeError(
+                "This column is non-nullable so does not have a mask"
+            )
+        elif null == 1:
+            raise RuntimeError(
+                "This column uses NaN as null "
+                "so does not have a separate mask"
+            )
+        elif null == 3:
+            valid_mask = (
+                cast(
                     cudf.core.column.CategoricalColumn, self._col
                 ).codes._get_mask_as_column()
-            else:
-                valid_mask = self._col._get_mask_as_column()
-
+                if self.dtype[0] == _DtypeKind.CATEGORICAL
+                else self._col._get_mask_as_column()
+            )
             assert (valid_mask is not None) and (
                 valid_mask.data is not None
             ), "valid_mask(.data) should not be None when "
@@ -419,15 +427,6 @@ class _CuDFColumn:
             dtype = (_DtypeKind.UINT, 8, "C", "=")
             return buffer, dtype
 
-        elif null == 1:
-            raise RuntimeError(
-                "This column uses NaN as null "
-                "so does not have a separate mask"
-            )
-        elif null == 0:
-            raise RuntimeError(
-                "This column is non-nullable so does not have a mask"
-            )
         else:
             raise NotImplementedError(
                 f"See {self.__class__.__name__}.describe_null method."
@@ -444,21 +443,20 @@ class _CuDFColumn:
         Raises RuntimeError if the data buffer does not have an associated
         offsets buffer.
         """
-        if self.dtype[0] == _DtypeKind.STRING:
-            offsets = self._col.children[0]
-            assert (offsets is not None) and (offsets.data is not None), " "
-            "offsets(.data) should not be None for string column"
-
-            buffer = _CuDFBuffer(
-                offsets.data, offsets.dtype, allow_copy=self._allow_copy
-            )
-            dtype = self._dtype_from_cudfdtype(offsets.dtype)
-        else:
+        if self.dtype[0] != _DtypeKind.STRING:
             raise RuntimeError(
                 "This column has a fixed-length dtype "
                 "so does not have an offsets buffer"
             )
 
+        offsets = self._col.children[0]
+        assert (offsets is not None) and (offsets.data is not None), " "
+        "offsets(.data) should not be None for string column"
+
+        buffer = _CuDFBuffer(
+            offsets.data, offsets.dtype, allow_copy=self._allow_copy
+        )
+        dtype = self._dtype_from_cudfdtype(offsets.dtype)
         return buffer, dtype
 
     def _get_data_buffer(
@@ -672,7 +670,7 @@ def _from_dataframe(df: DataFrameObject) -> _CuDFDataFrame:
         raise NotImplementedError("More than one chunk not handled yet")
 
     # We need a dict of columns here, with each column being a cudf column.
-    columns = dict()
+    columns = {}
     _buffers = []  # hold on to buffers, keeps memory alive
     for name in df.column_names():
         col = df.get_column_by_name(name)
@@ -730,20 +728,18 @@ def _protocol_to_cudf_column_numeric(
 
 
 def _check_buffer_is_on_gpu(buffer: _CuDFBuffer) -> None:
-    if (
-        buffer.__dlpack_device__()[0] != _Device.CUDA
-        and not buffer._allow_copy
-    ):
-        raise TypeError(
-            "This operation must copy data from CPU to GPU. "
-            "Set `allow_copy=True` to allow it."
-        )
+    if buffer.__dlpack_device__()[0] != _Device.CUDA:
+        if not buffer._allow_copy:
+            raise TypeError(
+                "This operation must copy data from CPU to GPU. "
+                "Set `allow_copy=True` to allow it."
+            )
 
-    elif buffer.__dlpack_device__()[0] != _Device.CUDA and buffer._allow_copy:
-        raise NotImplementedError(
-            "Only cuDF/GPU dataframes are supported for now. "
-            "CPU (like `Pandas`) dataframes will be supported shortly."
-        )
+        else:
+            raise NotImplementedError(
+                "Only cuDF/GPU dataframes are supported for now. "
+                "CPU (like `Pandas`) dataframes will be supported shortly."
+            )
 
 
 def _set_missing_values(
@@ -767,10 +763,9 @@ def _set_missing_values(
 
 def protocol_dtype_to_cupy_dtype(_dtype: ProtoDtype) -> cp.dtype:
     kind = _dtype[0]
+    if kind not in _SUPPORTED_KINDS:
+        raise RuntimeError(f"Data type {kind} not handled yet")
     bitwidth = _dtype[1]
-    if _dtype[0] not in _SUPPORTED_KINDS:
-        raise RuntimeError(f"Data type {_dtype[0]} not handled yet")
-
     return _CP_DTYPES[kind][bitwidth]
 
 

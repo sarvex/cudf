@@ -225,11 +225,7 @@ def test_series_binop_scalar(nelem, binop, obj_class, use_cudf_scalar):
     if obj_class == "Index":
         sr = as_index(sr)
 
-    if use_cudf_scalar:
-        result = binop(sr, rhs)
-    else:
-        result = binop(sr, cudf.Scalar(rhs))
-
+    result = binop(sr, rhs) if use_cudf_scalar else binop(sr, cudf.Scalar(rhs))
     if obj_class == "Index":
         result = Series(result)
 
@@ -1061,11 +1057,10 @@ def dtype_scalar(val, dtype):
     if dtype == "str":
         return str(val)
     dtype = cudf.dtype(dtype)
-    if dtype.type in {np.datetime64, np.timedelta64}:
-        res, _ = np.datetime_data(dtype)
-        return dtype.type(val, res)
-    else:
+    if dtype.type not in {np.datetime64, np.timedelta64}:
         return dtype.type(val)
+    res, _ = np.datetime_data(dtype)
+    return dtype.type(val, res)
 
 
 def make_scalar_add_data():
@@ -1863,9 +1858,7 @@ def test_binops_with_lhs_numpy_scalar(frame, dtype):
         else frame(data, dtype=dtype)
     )
 
-    if dtype == "datetime64[s]":
-        val = cudf.dtype(dtype).type(4, "s")
-    elif dtype == "timedelta64[s]":
+    if dtype in ["datetime64[s]", "timedelta64[s]"]:
         val = cudf.dtype(dtype).type(4, "s")
     elif dtype == "category":
         val = np.int64(4)
@@ -1912,10 +1905,7 @@ def test_binops_with_NA_consistent(dtype, op):
 
     result = getattr(sr, op)(cudf.NA)
     if dtype in NUMERIC_TYPES:
-        if op == "ne":
-            expect_all = True
-        else:
-            expect_all = False
+        expect_all = op == "ne"
         assert (result == expect_all).all()
     elif dtype in DATETIME_TYPES & TIMEDELTA_TYPES:
         assert result._column.null_count == len(data)
@@ -3135,10 +3125,7 @@ def generate_test_null_equals_columnops_data():
         for case in null_cases:
             left = cudf.Series(data, dtype=dtype)
             right = cudf.Series(data, dtype=dtype)
-            if case in {"left", "right"}:
-                answer = False
-            else:
-                answer = True
+            answer = case not in {"left", "right"}
             left, right = set_null_cases(left, right, case)
             results.append((left._column, right._column, answer, case))
 

@@ -62,8 +62,9 @@ def raise_assert_detail(obj, message, left, right, diff=None):
 def _check_types(
     left, right, check_categorical=True, exact="equiv", obj="Index"
 ):
-    if not exact or exact == "equiv":
-        if (
+    if (
+        (not exact or exact == "equiv")
+        and (
             isinstance(left, cudf.RangeIndex)
             and isinstance(
                 right,
@@ -74,7 +75,8 @@ def _check_types(
                     cudf.Int64Index,
                 ),
             )
-        ) or (
+        )
+        or (
             isinstance(right, cudf.RangeIndex)
             and isinstance(
                 left,
@@ -85,8 +87,9 @@ def _check_types(
                     cudf.Int64Index,
                 ),
             )
-        ):
-            return
+        )
+    ):
+        return
 
     if type(left) != type(right):
         raise_assert_detail(
@@ -97,11 +100,10 @@ def _check_types(
         exact
         and not isinstance(left, cudf.MultiIndex)
         and is_categorical_dtype(left)
-    ):
-        if left.dtype != right.dtype:
-            raise_assert_detail(
-                obj, "Categorical difference", f"{left}", f"{right}"
-            )
+    ) and left.dtype != right.dtype:
+        raise_assert_detail(
+            obj, "Categorical difference", f"{left}", f"{right}"
+        )
 
 
 def assert_column_equal(
@@ -157,19 +159,15 @@ def assert_column_equal(
     """
     if check_dtype is True:
         if (
-            is_categorical_dtype(left)
-            and is_categorical_dtype(right)
-            and not check_categorical
-        ):
-            pass
-        else:
-            if type(left) != type(right) or left.dtype != right.dtype:
-                msg1 = f"{left.dtype}"
-                msg2 = f"{right.dtype}"
-                raise_assert_detail(obj, "Dtypes are different", msg1, msg2)
-    else:
-        if left.null_count == len(left) and right.null_count == len(right):
-            return True
+            not is_categorical_dtype(left)
+            or not is_categorical_dtype(right)
+            or check_categorical
+        ) and (type(left) != type(right) or left.dtype != right.dtype):
+            msg1 = f"{left.dtype}"
+            msg2 = f"{right.dtype}"
+            raise_assert_detail(obj, "Dtypes are different", msg1, msg2)
+    elif left.null_count == len(left) and right.null_count == len(right):
+        return True
 
     if check_datetimelike_compat:
         if np.issubdtype(left.dtype, np.datetime64):
@@ -185,38 +183,42 @@ def assert_column_equal(
                 )
             return
 
-    if check_exact and check_categorical:
-        if is_categorical_dtype(left) and is_categorical_dtype(right):
-            left_cat = left.categories
-            right_cat = right.categories
+    if (
+        check_exact
+        and check_categorical
+        and is_categorical_dtype(left)
+        and is_categorical_dtype(right)
+    ):
+        left_cat = left.categories
+        right_cat = right.categories
 
-            if check_category_order:
-                assert_index_equal(
-                    left_cat,
-                    right_cat,
-                    exact=check_dtype,
-                    check_exact=True,
-                    check_categorical=False,
-                    rtol=rtol,
-                    atol=atol,
-                )
-                assert_column_equal(
-                    left.codes,
-                    right.codes,
-                    check_dtype=check_dtype,
-                    check_exact=True,
-                    check_categorical=False,
-                    check_category_order=False,
-                    rtol=rtol,
-                    atol=atol,
-                )
+        if check_category_order:
+            assert_index_equal(
+                left_cat,
+                right_cat,
+                exact=check_dtype,
+                check_exact=True,
+                check_categorical=False,
+                rtol=rtol,
+                atol=atol,
+            )
+            assert_column_equal(
+                left.codes,
+                right.codes,
+                check_dtype=check_dtype,
+                check_exact=True,
+                check_categorical=False,
+                check_category_order=False,
+                rtol=rtol,
+                atol=atol,
+            )
 
-            if left.ordered != right.ordered:
-                msg1 = f"{left.ordered}"
-                msg2 = f"{right.ordered}"
-                raise_assert_detail(
-                    f"{obj} category", "Orders are different", msg1, msg2
-                )
+        if left.ordered != right.ordered:
+            msg1 = f"{left.ordered}"
+            msg2 = f"{right.ordered}"
+            raise_assert_detail(
+                f"{obj} category", "Orders are different", msg1, msg2
+            )
 
     if (
         not check_dtype
@@ -271,13 +273,14 @@ def assert_column_equal(
                 left = left.astype(left.categories.dtype)
                 right = right.astype(right.categories.dtype)
     if not columns_equal:
-        ldata = str([val for val in left.to_pandas(nullable=True)])
-        rdata = str([val for val in right.to_pandas(nullable=True)])
+        ldata = str(list(left.to_pandas(nullable=True)))
+        rdata = str(list(right.to_pandas(nullable=True)))
         try:
-            diff = 0
-            for i in range(left.size):
-                if not null_safe_scalar_equals(left[i], right[i]):
-                    diff += 1
+            diff = sum(
+                1
+                for i in range(left.size)
+                if not null_safe_scalar_equals(left[i], right[i])
+            )
             diff = diff * 100.0 / left.size
         except BaseException:
             diff = 100.0

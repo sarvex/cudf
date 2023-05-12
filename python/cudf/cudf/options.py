@@ -33,9 +33,7 @@ def _env_get_bool(name, default):
     env = env.lower().strip()
     if env == "true" or env == "on" or as_a_int:
         return True
-    if env == "false" or env == "off" or as_a_int == 0:
-        return False
-    return default
+    return False if env == "false" or env == "off" or as_a_int == 0 else default
 
 
 def _register_option(

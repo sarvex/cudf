@@ -297,7 +297,7 @@ class RangeIndex(BaseIndex, BinaryOperand):
             item, tuple(np.sctypes["int"] + np.sctypes["float"] + [int, float])
         ):
             return False
-        if not item % 1 == 0:
+        if item % 1 != 0:
             return False
         return item in range(self._start, self._stop, self._step)
 
@@ -409,20 +409,21 @@ class RangeIndex(BaseIndex, BinaryOperand):
 
     @_cudf_nvtx_annotate
     def equals(self, other):
-        if isinstance(other, RangeIndex):
-            if (self._start, self._stop, self._step) == (
-                other._start,
-                other._stop,
-                other._step,
-            ):
-                return True
+        if isinstance(other, RangeIndex) and (
+            self._start,
+            self._stop,
+            self._step,
+        ) == (
+            other._start,
+            other._stop,
+            other._step,
+        ):
+            return True
         return self._as_int_index().equals(other)
 
     @_cudf_nvtx_annotate
     def serialize(self):
-        header = {}
-        header["index_column"] = {}
-
+        header = {"index_column": {}}
         # store metadata values of index separately
         # We don't need to store the GPU buffer for RangeIndexes
         # cuDF only needs to store start/stop and rehydrate
@@ -565,8 +566,7 @@ class RangeIndex(BaseIndex, BinaryOperand):
             step = self._step
 
         stop = start + len(self) * step
-        pos = search_range(start, stop, label, step, side=side)
-        return pos
+        return search_range(start, stop, label, step, side=side)
 
     @_cudf_nvtx_annotate
     def memory_usage(self, deep=False):
@@ -650,13 +650,13 @@ class RangeIndex(BaseIndex, BinaryOperand):
         ):
             raise KeyError(key)
 
+        if tolerance is not None and (abs(idx) * self._step > tolerance):
+            raise KeyError(key)
         round_method = {
             "ffill": math.floor,
             "bfill": math.ceil,
             "nearest": round,
         }[method]
-        if tolerance is not None and (abs(idx) * self._step > tolerance):
-            raise KeyError(key)
         return np.clip(round_method(idx), 0, idx_int_upper_bound, dtype=int)
 
     @_cudf_nvtx_annotate
@@ -800,15 +800,11 @@ class RangeIndex(BaseIndex, BinaryOperand):
             if self.step < 0:
                 sorted_index = self[::-1]
                 indexer = indexer[::-1]
-        else:
-            if self.step > 0:
-                sorted_index = self[::-1]
-                indexer = indexer = indexer[::-1]
+        elif self.step > 0:
+            sorted_index = self[::-1]
+            indexer = indexer = indexer[::-1]
 
-        if return_indexer:
-            return sorted_index, indexer
-        else:
-            return sorted_index
+        return (sorted_index, indexer) if return_indexer else sorted_index
 
     @_cudf_nvtx_annotate
     def _gather(self, gather_map, nullify=False, check_bounds=True):
@@ -990,10 +986,7 @@ class GenericIndex(SingleColumnFrame, BaseIndex):
             data = data
         else:
             if isinstance(data, (list, tuple)):
-                if len(data) == 0:
-                    data = np.asarray([], dtype="int64")
-                else:
-                    data = np.asarray(data)
+                data = np.asarray([], dtype="int64") if len(data) == 0 else np.asarray(data)
             data = column.as_column(data)
             assert isinstance(data, (NumericalColumn, StringColumn))
 
@@ -1007,9 +1000,7 @@ class GenericIndex(SingleColumnFrame, BaseIndex):
         if ret is not None:
             return ret
 
-        # Attempt to dispatch all other functions to cupy.
-        cupy_func = getattr(cupy, ufunc.__name__)
-        if cupy_func:
+        if cupy_func := getattr(cupy, ufunc.__name__):
             if ufunc.nin == 2:
                 other = inputs[self is inputs[0]]
                 inputs = self._make_operands_for_binop(other)
@@ -1282,15 +1273,19 @@ class GenericIndex(SingleColumnFrame, BaseIndex):
 
         if lower_bound == upper_bound:
             # Key not found, apply method
-            if method in ("pad", "ffill"):
-                if lower_bound == 0:
-                    raise KeyError(key)
+            if (
+                method in ("pad", "ffill")
+                and lower_bound == 0
+                or method not in ("pad", "ffill", "backfill", "bfill", "nearest")
+            ):
+                raise KeyError(key)
+            elif method in ("pad", "ffill"):
                 return lower_bound - 1
             elif method in ("backfill", "bfill"):
                 if lower_bound == self._data.nrows:
                     raise KeyError(key)
                 return lower_bound
-            elif method == "nearest":
+            else:
                 if lower_bound == self._data.nrows:
                     return lower_bound - 1
                 elif lower_bound == 0:
@@ -1302,9 +1297,6 @@ class GenericIndex(SingleColumnFrame, BaseIndex):
                     if abs(lower_val - key) < abs(upper_val - key)
                     else lower_bound
                 )
-            else:
-                raise KeyError(key)
-
         if lower_bound + 1 == upper_bound:
             # Search result is unique, return int.
             return (
@@ -1327,12 +1319,9 @@ class GenericIndex(SingleColumnFrame, BaseIndex):
     @_cudf_nvtx_annotate
     def __repr__(self):
         max_seq_items = get_option("max_seq_items") or len(self)
-        mr = 0
-        if 2 * max_seq_items < len(self):
-            mr = max_seq_items + 1
-
+        mr = max_seq_items + 1 if 2 * max_seq_items < len(self) else 0
         if len(self) > mr and mr != 0:
-            top = self[0:mr]
+            top = self[:mr]
             bottom = self[-1 * mr :]
 
             preprocess = cudf.concat([top, bottom])
@@ -1390,9 +1379,9 @@ class GenericIndex(SingleColumnFrame, BaseIndex):
         dtype_index = tmp_meta.rfind(" dtype=")
         prior_to_dtype = tmp_meta[:dtype_index]
         lines = lines[:-1]
-        lines.append(prior_to_dtype + " dtype='%s'" % self.dtype)
+        lines.append(prior_to_dtype + f" dtype='{self.dtype}'")
         if self.name is not None:
-            lines[-1] = lines[-1] + ", name='%s'" % self.name
+            lines[-1] = lines[-1] + f", name='{self.name}'"
         if "length" in tmp_meta:
             lines[-1] = lines[-1] + ", length=%d)" % len(self)
         else:
@@ -1588,9 +1577,11 @@ class GenericIndex(SingleColumnFrame, BaseIndex):
                         f"either one of them to same dtypes."
                     )
 
-                if isinstance(self._values, cudf.core.column.NumericalColumn):
-                    if self.dtype != other.dtype:
-                        this, other = numeric_normalize_types(self, other)
+                if (
+                    isinstance(self._values, cudf.core.column.NumericalColumn)
+                    and self.dtype != other.dtype
+                ):
+                    this, other = numeric_normalize_types(self, other)
                 to_concat = [this, other]
 
         for obj in to_concat:
@@ -2686,12 +2677,13 @@ class CategoricalIndex(GenericIndex):
         copy=False,
         name=None,
     ):
-        if isinstance(dtype, (pd.CategoricalDtype, cudf.CategoricalDtype)):
-            if categories is not None or ordered is not None:
-                raise ValueError(
-                    "Cannot specify `categories` or "
-                    "`ordered` together with `dtype`."
-                )
+        if isinstance(dtype, (pd.CategoricalDtype, cudf.CategoricalDtype)) and (
+            categories is not None or ordered is not None
+        ):
+            raise ValueError(
+                "Cannot specify `categories` or "
+                "`ordered` together with `dtype`."
+            )
         if copy:
             data = column.as_column(data, dtype=dtype).copy(deep=True)
         kwargs = _setdefault_name(data, name=name)
@@ -2855,7 +2847,7 @@ def interval_range(
             right_col = arange(
                 start.value, end.value, freq.value, dtype=common_dtype
             )
-    elif freq and not periods:
+    elif freq:
         if end is not None and start is not None:
             end = end - freq + 1
             left_col = arange(
@@ -2867,13 +2859,7 @@ def interval_range(
                 start.value, end.value, freq.value, dtype=common_dtype
             )
     elif start is not None and end is not None:
-        # if statements for mypy to pass
-        if freq:
-            left_col = arange(
-                start.value, end.value, freq.value, dtype=common_dtype
-            )
-        else:
-            left_col = arange(start.value, end.value, dtype=common_dtype)
+        left_col = arange(start.value, end.value, dtype=common_dtype)
         start = start + 1
         end = end + 1
         if freq:
@@ -3061,10 +3047,7 @@ class StringIndex(GenericIndex):
         return StringMethods(parent=self)
 
     def _clean_nulls_from_index(self):
-        if self._values.has_nulls():
-            return self.fillna(cudf._NA_REP)
-        else:
-            return self
+        return self.fillna(cudf._NA_REP) if self._values.has_nulls() else self
 
     def _is_boolean(self):
         return False
@@ -3267,16 +3250,14 @@ def _concat_range_index(indexes: List[RangeIndex]) -> BaseIndex:
         elif step is None:
             # First non-empty index had only one element
             if obj.start == start:
-                result = as_index(concat_columns([x._values for x in indexes]))
-                return result
+                return as_index(concat_columns([x._values for x in indexes]))
             step = obj.start - start
 
         non_consecutive = (step != obj.step and len(obj) > 1) or (
             next_ is not None and obj.start != next_
         )
         if non_consecutive:
-            result = as_index(concat_columns([x._values for x in indexes]))
-            return result
+            return as_index(concat_columns([x._values for x in indexes]))
         if step is not None:
             next_ = obj[-1] + step
 

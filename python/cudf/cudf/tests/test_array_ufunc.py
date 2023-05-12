@@ -120,11 +120,10 @@ def test_binary_ufunc_index_array(ufunc, reflect):
                 assert (cp.asnumpy(g) == e).all()
             else:
                 assert_eq(g, e, check_exact=False)
+    elif reflect:
+        assert (cp.asnumpy(got) == expect).all()
     else:
-        if reflect:
-            assert (cp.asnumpy(got) == expect).all()
-        else:
-            assert_eq(got, expect, check_exact=False)
+        assert_eq(got, expect, check_exact=False)
 
 
 @pytest.mark.parametrize("ufunc", _UFUNCS)
@@ -205,10 +204,9 @@ def test_ufunc_series(request, ufunc, has_nulls, indexed):
             if has_nulls:
                 e[mask] = np.nan
             assert_eq(g, e, check_exact=False)
-    else:
-        if has_nulls:
-            expect[mask] = np.nan
-            assert_eq(got, expect, check_exact=False)
+    elif has_nulls:
+        expect[mask] = np.nan
+        assert_eq(got, expect, check_exact=False)
 
 
 @pytest.mark.parametrize(

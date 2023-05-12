@@ -155,12 +155,10 @@ def _describe_categorical(obj, percentiles):
         tied_val_counts = val_counts[
             val_counts == val_counts.iloc[0]
         ].sort_index()
-        data.update(
-            {
-                "top": tied_val_counts.index[0],
-                "freq": tied_val_counts.iloc[0],
-            }
-        )
+        data |= {
+            "top": tied_val_counts.index[0],
+            "freq": tied_val_counts.iloc[0],
+        }
     return data
 
 
@@ -250,10 +248,7 @@ class _SeriesLocIndexer(_FrameIndexer):
         if isinstance(self._frame.index, cudf.MultiIndex) and not isinstance(
             arg, cudf.MultiIndex
         ):
-            if is_scalar(arg):
-                row_arg = (arg,)
-            else:
-                row_arg = arg
+            row_arg = (arg, ) if is_scalar(arg) else arg
             result = self._frame.index._get_row_major(self._frame, row_arg)
             if (
                 isinstance(arg, tuple)
@@ -275,15 +270,14 @@ class _SeriesLocIndexer(_FrameIndexer):
             key = self._loc_to_iloc(key)
         except KeyError as e:
             if (
-                is_scalar(key)
-                and not isinstance(self._frame.index, cudf.MultiIndex)
-                and is_scalar(value)
+                not is_scalar(key)
+                or isinstance(self._frame.index, cudf.MultiIndex)
+                or not is_scalar(value)
             ):
-                _append_new_row_inplace(self._frame.index._values, key)
-                _append_new_row_inplace(self._frame._column, value)
-                return
-            else:
                 raise e
+            _append_new_row_inplace(self._frame.index._values, key)
+            _append_new_row_inplace(self._frame._column, value)
+            return
         if isinstance(value, (pd.Series, cudf.Series)):
             value = cudf.Series(value)
             value = value._align_to_index(self._frame.index, how="right")
@@ -300,16 +294,13 @@ class _SeriesLocIndexer(_FrameIndexer):
                 if isinstance(arg, cudf.Scalar) and is_integer_dtype(
                     arg.dtype
                 ):
-                    found_index = arg.value
-                    return found_index
+                    return arg.value
                 elif is_integer(arg):
-                    found_index = arg
-                    return found_index
+                    return arg
             try:
-                found_index = self._frame.index._values.find_first_value(
+                return self._frame.index._values.find_first_value(
                     arg, closest=False
                 )
-                return found_index
             except (TypeError, KeyError, IndexError, ValueError):
                 raise KeyError("label scalar is out of bound")
 
@@ -327,11 +318,10 @@ class _SeriesLocIndexer(_FrameIndexer):
             arg = cudf.core.series.Series(cudf.core.column.as_column(arg))
             if arg.dtype in (bool, np.bool_):
                 return arg
-            else:
-                indices = _indices_from_labels(self._frame, arg)
-                if indices.null_count > 0:
-                    raise KeyError("label scalar is out of bound")
-                return indices
+            indices = _indices_from_labels(self._frame, arg)
+            if indices.null_count > 0:
+                raise KeyError("label scalar is out of bound")
+            return indices
 
 
 class Series(SingleColumnFrame, IndexedFrame, Serializable):
@@ -588,9 +578,8 @@ class Series(SingleColumnFrame, IndexedFrame, Serializable):
             )
             if copy and has_cai:
                 data = data.copy(deep=True)
-        else:
-            if dtype is not None:
-                data = data.astype(dtype)
+        elif dtype is not None:
+            data = data.astype(dtype)
 
         if index is not None and not isinstance(index, BaseIndex):
             index = as_index(index)
@@ -1302,10 +1291,7 @@ class Series(SingleColumnFrame, IndexedFrame, Serializable):
 
     @_cudf_nvtx_annotate
     def __getitem__(self, arg):
-        if isinstance(arg, slice):
-            return self.iloc[arg]
-        else:
-            return self.loc[arg]
+        return self.iloc[arg] if isinstance(arg, slice) else self.loc[arg]
 
     iteritems = SingleColumnFrame.__iter__
 
@@ -1399,7 +1385,7 @@ class Series(SingleColumnFrame, IndexedFrame, Serializable):
         if len(lines) > 1:
             if lines[-1].startswith("Name: "):
                 lines = lines[:-1]
-                lines.append("Name: %s" % str(self.name))
+                lines.append(f"Name: {str(self.name)}")
                 if len(self) > len(preprocess):
                     lines[-1] = lines[-1] + ", Length: %d" % len(self)
                 lines[-1] = lines[-1] + ", "
@@ -1410,10 +1396,10 @@ class Series(SingleColumnFrame, IndexedFrame, Serializable):
             else:
                 lines = lines[:-1]
                 lines[-1] = lines[-1] + "\n"
-            lines[-1] = lines[-1] + "dtype: %s" % self.dtype
+            lines[-1] = lines[-1] + f"dtype: {self.dtype}"
         else:
             lines = output.split(",")
-            lines[-1] = " dtype: %s)" % self.dtype
+            lines[-1] = f" dtype: {self.dtype})"
             return ",".join(lines)
         if isinstance(preprocess._column, cudf.core.column.CategoricalColumn):
             lines.append(category_memory)
@@ -1515,18 +1501,7 @@ class Series(SingleColumnFrame, IndexedFrame, Serializable):
                 ):
                     continue
 
-                if (
-                    not dtype_mismatch
-                    and (
-                        not isinstance(
-                            objs[0]._column, cudf.core.column.CategoricalColumn
-                        )
-                        and not isinstance(
-                            obj._column, cudf.core.column.CategoricalColumn
-                        )
-                    )
-                    and objs[0].dtype != obj.dtype
-                ):
+                if not dtype_mismatch and objs[0].dtype != obj.dtype:
                     dtype_mismatch = True
 
                 if is_mixed_with_object_dtype(objs[0], obj):
@@ -3498,8 +3473,7 @@ class Series(SingleColumnFrame, IndexedFrame, Serializable):
 
         data = self.fillna(method=fill_method, limit=limit)
         diff = data.diff(periods=periods)
-        change = diff / data.shift(periods=periods, freq=freq)
-        return change
+        return diff / data.shift(periods=periods, freq=freq)
 
     @_cudf_nvtx_annotate
     def where(self, cond, other=None, inplace=False):
@@ -4869,21 +4843,9 @@ def _align_indices(series_list, how="outer", allow_non_unique=False):
     # check if all indices are the same
     head = series_list[0].index
 
-    all_index_equal = True
-    for sr in series_list[1:]:
-        if not sr.index.equals(head):
-            all_index_equal = False
-            break
-
-    # check if all names are the same
-    all_names_equal = True
-    for sr in series_list[1:]:
-        if not sr.index.names == head.names:
-            all_names_equal = False
-    new_index_names = [None] * head.nlevels
-    if all_names_equal:
-        new_index_names = head.names
-
+    all_index_equal = all(sr.index.equals(head) for sr in series_list[1:])
+    all_names_equal = all(sr.index.names == head.names for sr in series_list[1:])
+    new_index_names = head.names if all_names_equal else [None] * head.nlevels
     if all_index_equal:
         return series_list
 
@@ -4898,15 +4860,12 @@ def _align_indices(series_list, how="outer", allow_non_unique=False):
         ).index
     combined_index.names = new_index_names
 
-    # align all Series to the combined index
-    result = [
+    return [
         sr._align_to_index(
             combined_index, how=how, allow_non_unique=allow_non_unique
         )
         for sr in series_list
     ]
-
-    return result
 
 
 @acquire_spill_lock()

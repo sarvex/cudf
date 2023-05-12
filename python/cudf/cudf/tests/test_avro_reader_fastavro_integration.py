@@ -298,9 +298,7 @@ def test_can_detect_dtypes_from_avro_logical_type(
 
 
 def get_days_from_epoch(date: Optional[datetime.date]) -> Optional[int]:
-    if date is None:
-        return None
-    return (date - datetime.date(1970, 1, 1)).days
+    return None if date is None else (date - datetime.date(1970, 1, 1)).days
 
 
 @pytest.mark.parametrize("namespace", [None, "root_ns"])
@@ -310,11 +308,7 @@ def test_can_parse_avro_date_logical_type(namespace, nullable, prepend_null):
 
     avro_type = {"logicalType": "date", "type": "int"}
     if nullable:
-        if prepend_null:
-            avro_type = ["null", avro_type]
-        else:
-            avro_type = [avro_type, "null"]
-
+        avro_type = ["null", avro_type] if prepend_null else [avro_type, "null"]
     schema_dict = {
         "type": "record",
         "name": "test",
@@ -381,7 +375,7 @@ def test_alltypes_plain_avro():
 
     with open(path, "rb") as f:
         reader = fastavro.reader(f)
-        records = [record for record in reader]
+        records = list(reader)
 
     # For reference:
     #
@@ -633,11 +627,7 @@ def test_avro_reader_multiblock(
         ],
     }
 
-    if use_sync_interval:
-        kwds = {"sync_interval": sync_interval}
-    else:
-        kwds = {}
-
+    kwds = {"sync_interval": sync_interval} if use_sync_interval else {}
     kwds["codec"] = codec
 
     buffer = io.BytesIO()

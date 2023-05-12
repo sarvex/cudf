@@ -73,26 +73,13 @@ class CSVReader(IOFuzz):
 
     def write_data(self, file_name):
         if self._current_buffer is not None:
-            self._current_buffer.to_csv(file_name + "_crash.csv")
+            self._current_buffer.to_csv(f"{file_name}_crash.csv")
 
     def set_rand_params(self, params):
         params_dict = {}
         for param, values in params.items():
             if values == ALL_POSSIBLE_VALUES:
-                if param == "usecols":
-                    col_size = self._rand(len(self._df.columns))
-                    col_val = np.random.choice(
-                        [
-                            None,
-                            np.unique(
-                                np.random.choice(self._df.columns, col_size)
-                            ),
-                        ]
-                    )
-                    params_dict[param] = (
-                        col_val if col_val is None else list(col_val)
-                    )
-                elif param == "dtype":
+                if param == "dtype":
                     dtype_val = np.random.choice(
                         [None, self._df.dtypes.to_dict()]
                     )
@@ -109,19 +96,28 @@ class CSVReader(IOFuzz):
                         ["infer", np.random.randint(low=0, high=len(self._df))]
                     )
                     params_dict[param] = header_val
-                elif param == "skiprows":
-                    params_dict[param] = np.random.randint(
-                        low=0, high=len(self._df)
-                    )
-                elif param == "skipfooter":
-                    params_dict[param] = np.random.randint(
-                        low=0, high=len(self._df)
-                    )
                 elif param == "nrows":
                     nrows_val = np.random.choice(
                         [None, np.random.randint(low=0, high=len(self._df))]
                     )
                     params_dict[param] = nrows_val
+                elif param in ["skiprows", "skipfooter"]:
+                    params_dict[param] = np.random.randint(
+                        low=0, high=len(self._df)
+                    )
+                elif param == "usecols":
+                    col_size = self._rand(len(self._df.columns))
+                    col_val = np.random.choice(
+                        [
+                            None,
+                            np.unique(
+                                np.random.choice(self._df.columns, col_size)
+                            ),
+                        ]
+                    )
+                    params_dict[param] = (
+                        col_val if col_val is None else list(col_val)
+                    )
             else:
                 params_dict[param] = np.random.choice(values)
         self._current_params["test_kwargs"] = self.process_kwargs(params_dict)
@@ -178,7 +174,7 @@ class CSVWriter(IOFuzz):
 
     def write_data(self, file_name):
         if self._current_buffer is not None:
-            self._current_buffer.to_csv(file_name + "_crash.csv")
+            self._current_buffer.to_csv(f"{file_name}_crash.csv")
 
     def set_rand_params(self, params):
         params_dict = {}

@@ -16,8 +16,8 @@
 import gdb
 
 global_locals = locals()
-if not all(
-    name in global_locals
+if any(
+    name not in global_locals
     for name in (
         "HostIterator",
         "DeviceIterator",

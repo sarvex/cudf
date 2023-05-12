@@ -149,7 +149,7 @@ def assign_entries_to_threads(entries):
 # format the build-time
 def format_build_time(input_time):
     build_time = abs(input_time)
-    build_time_str = str(build_time) + " ms"
+    build_time_str = f"{str(build_time)} ms"
     if build_time > 120000:  # 2 minutes
         minutes = int(build_time / 60000)
         seconds = int(((build_time / 60000) - minutes) * 60)
@@ -157,7 +157,7 @@ def format_build_time(input_time):
     elif build_time > 1000:
         build_time_str = "{:.3f} s".format(build_time / 1000)
     if input_time < 0:
-        build_time_str = "-" + build_time_str
+        build_time_str = f"-{build_time_str}"
     return build_time_str
 
 
@@ -170,9 +170,9 @@ def format_file_size(input_size):
     elif file_size > 1000:
         file_size_str = "{:.3f} KB".format(file_size / 1000)
     elif file_size > 0:
-        file_size_str = str(file_size) + " bytes"
+        file_size_str = f"{str(file_size)} bytes"
     if input_size < 0:
-        file_size_str = "-" + file_size_str
+        file_size_str = f"-{file_size_str}"
     return file_size_str
 
 
@@ -314,10 +314,10 @@ def output_html(entries, sorted_list, cmp_entries, args):
             if build_time > 60000:
                 if diff_percent > 20:
                     diff_color = red
-                    diff_time_str = "<b>" + diff_time_str + "</b>"
+                    diff_time_str = f"<b>{diff_time_str}</b>"
                 elif diff_percent < -20:
                     diff_color = green
-                    diff_time_str = "<b>" + diff_time_str + "</b>"
+                    diff_time_str = f"<b>{diff_time_str}</b>"
                 elif diff_percent > 0:
                     diff_color = yellow
             print(

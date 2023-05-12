@@ -260,11 +260,19 @@ def process_class_docstrings(app, what, name, obj, options, lines):
     This "autodoc-process-docstring" event connector removes that part
     from the processed docstring.
     """
-    if what == "class":
-        if name in {"cudf.RangeIndex", "cudf.Int64Index", "cudf.UInt64Index", "cudf.Float64Index", "cudf.CategoricalIndex", "cudf.IntervalIndex", "cudf.MultiIndex", "cudf.DatetimeIndex", "cudf.TimedeltaIndex", "cudf.TimedeltaIndex"}:
-
-            cut_index = lines.index('.. rubric:: Attributes')
-            lines[:] = lines[:cut_index]
+    if what == "class" and name in {
+        "cudf.RangeIndex",
+        "cudf.Int64Index",
+        "cudf.UInt64Index",
+        "cudf.Float64Index",
+        "cudf.CategoricalIndex",
+        "cudf.IntervalIndex",
+        "cudf.MultiIndex",
+        "cudf.DatetimeIndex",
+        "cudf.TimedeltaIndex",
+    }:
+        cut_index = lines.index('.. rubric:: Attributes')
+        lines[:] = lines[:cut_index]
 
 
 nitpick_ignore = [("py:class", "SeriesOrIndex"),]

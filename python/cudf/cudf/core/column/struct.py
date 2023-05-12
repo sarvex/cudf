@@ -28,10 +28,7 @@ class StructColumn(ColumnBase):
 
     @property
     def base_size(self):
-        if not self.base_children:
-            return 0
-        else:
-            return len(self.base_children[0])
+        return 0 if not self.base_children else len(self.base_children[0])
 
     def to_arrow(self):
         children = [
@@ -80,10 +77,7 @@ class StructColumn(ColumnBase):
 
     def element_indexing(self, index: int):
         result = super().element_indexing(index)
-        return {
-            field: value
-            for field, value in zip(self.dtype.fields, result.values())
-        }
+        return dict(zip(self.dtype.fields, result.values()))
 
     def __setitem__(self, key, value):
         if isinstance(value, dict):
@@ -195,15 +189,14 @@ class StructMethods(ColumnMethods):
             pos = fields.index(key)
             return self._return_or_inplace(self._column.children[pos])
         else:
-            if isinstance(key, int):
-                try:
-                    return self._return_or_inplace(self._column.children[key])
-                except IndexError:
-                    raise IndexError(f"Index {key} out of range")
-            else:
+            if not isinstance(key, int):
                 raise KeyError(
                     f"Field '{key}' is not found in the set of existing keys."
                 )
+            try:
+                return self._return_or_inplace(self._column.children[key])
+            except IndexError:
+                raise IndexError(f"Index {key} out of range")
 
     def explode(self):
         """

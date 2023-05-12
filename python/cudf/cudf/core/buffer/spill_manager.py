@@ -158,7 +158,7 @@ class SpillStatistics:
         with self.lock:
             ret = f"Spill Statistics (level={self.level}):\n"
             if self.level == 0:
-                return ret[:-1] + " N/A"
+                return f"{ret[:-1]} N/A"
 
             # Print spilling stats
             ret += "  Spilling (level >= 1):"
@@ -172,7 +172,7 @@ class SpillStatistics:
             # Print expose stats
             ret += "  Exposed buffers (level >= 2): "
             if self.level < 2:
-                return ret + "disabled"
+                return f"{ret}disabled"
             if len(self.exposes) == 0:
                 ret += "None"
             ret += "\n"
@@ -390,10 +390,11 @@ class SpillManager:
         unspilled = sum(
             buf.size for buf in self.buffers() if not buf.is_spilled
         )
-        unspillable = 0
-        for buf in self.buffers():
-            if not (buf.is_spilled or buf.spillable):
-                unspillable += buf.size
+        unspillable = sum(
+            buf.size
+            for buf in self.buffers()
+            if not (buf.is_spilled or buf.spillable)
+        )
         unspillable_ratio = unspillable / unspilled if unspilled else 0
 
         dev_limit = "N/A"

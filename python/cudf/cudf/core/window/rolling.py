@@ -194,11 +194,10 @@ class Rolling(GetAttrGetItemMixin, Reducible):
             raise NotImplementedError("axis != 0 is not supported yet.")
         self.axis = axis
 
-        if win_type is not None:
-            if win_type != "boxcar":
-                raise NotImplementedError(
-                    "Only the default win_type 'boxcar' is currently supported"
-                )
+        if win_type is not None and win_type != "boxcar":
+            raise NotImplementedError(
+                "Only the default win_type 'boxcar' is currently supported"
+            )
         self.win_type = win_type
 
     def __getitem__(self, arg):
@@ -487,17 +486,14 @@ class Rolling(GetAttrGetItemMixin, Reducible):
         """
         if is_integer(window):
             return window
-        else:
-            with acquire_spill_lock():
-                return cudautils.window_sizes_from_offset(
-                    self.obj.index._values.data_array_view(mode="write"),
-                    window,
-                )
+        with acquire_spill_lock():
+            return cudautils.window_sizes_from_offset(
+                self.obj.index._values.data_array_view(mode="write"),
+                window,
+            )
 
     def __repr__(self):
-        return "{} [window={},min_periods={},center={}]".format(
-            self.__class__.__name__, self.window, self.min_periods, self.center
-        )
+        return f"{self.__class__.__name__} [window={self.window},min_periods={self.min_periods},center={self.center}]"
 
 
 class RollingGroupby(Rolling):
@@ -547,13 +543,12 @@ class RollingGroupby(Rolling):
             self.min_periods = 0
         index = cudf.MultiIndex.from_frame(
             cudf.DataFrame(
-                {
-                    key: value
-                    for key, value in itertools.chain(
+                dict(
+                    itertools.chain(
                         self._group_keys._data.items(),
                         self.obj.index._data.items(),
                     )
-                }
+                )
             )
         )
 

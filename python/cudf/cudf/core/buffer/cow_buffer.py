@@ -122,14 +122,13 @@ class CopyOnWriteBuffer(Buffer):
     def copy(self, deep: bool = True):
         if deep or self._zero_copied:
             return super().copy(deep=True)
-        else:
-            cls = type(self)
-            copied_buf = cls.__new__(cls)
-            copied_buf._ptr = self._ptr
-            copied_buf._size = self._size
-            copied_buf._owner = self._owner
-            copied_buf._finalize_init()
-            return copied_buf
+        cls = type(self)
+        copied_buf = cls.__new__(cls)
+        copied_buf._ptr = self._ptr
+        copied_buf._size = self._size
+        copied_buf._owner = self._owner
+        copied_buf._finalize_init()
+        return copied_buf
 
     @property
     def __cuda_array_interface__(self) -> dict:

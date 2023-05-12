@@ -27,14 +27,14 @@ def make_gather_map(len_gather_map: Real, len_column: Real, how: str):
     len_column = round(len_column)
 
     rstate = cupy.random.RandomState(seed=0)
-    if how == "sequence":
-        return cudf.Series(cupy.arange(0, len_gather_map))
+    if how == "random":
+        return cudf.Series(rstate.randint(0, len_column, len_gather_map))
     elif how == "reverse":
         return cudf.Series(
             cupy.arange(len_column - 1, len_column - len_gather_map - 1, -1)
         )
-    elif how == "random":
-        return cudf.Series(rstate.randint(0, len_column, len_gather_map))
+    elif how == "sequence":
+        return cudf.Series(cupy.arange(0, len_gather_map))
 
 
 def make_boolean_mask_column(size):

@@ -204,14 +204,12 @@ def call_len_string_view(st):
 def len_impl(context, builder, sig, args):
     sv_ptr = builder.alloca(args[0].type)
     builder.store(args[0], sv_ptr)
-    result = context.compile_internal(
+    return context.compile_internal(
         builder,
         call_len_string_view,
         nb_signature(size_type, _STR_VIEW_PTR),
         (sv_ptr,),
     )
-
-    return result
 
 
 def call_concat_string_view(result, lhs, rhs):

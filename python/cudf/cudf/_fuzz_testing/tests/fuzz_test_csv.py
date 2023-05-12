@@ -37,12 +37,7 @@ def csv_writer_test(pdf):
     assert_eq(actual, expected)
 
 
-@pythonfuzz(
-    data_handle=CSVWriter,
-    params={
-        "sep": list([",", "|", "\t", "\r", "~"]),
-        "header": [True, False],
-        "na_rep": [
+@pythonfuzz(data_handle=CSVWriter, params={"sep": [",", "|", "\t", "\r", "~"], "header": [True, False], "na_rep": [
             "",
             "<NA>",
             "NA",
@@ -51,13 +46,7 @@ def csv_writer_test(pdf):
             "<<<<>>>>>",
             "--<>--",
             "-+><+-",
-        ],
-        "columns": ALL_POSSIBLE_VALUES,
-        "index": [True, False],
-        "lineterminator": ["\n", "\r", "\r\n"],
-        "chunksize": ALL_POSSIBLE_VALUES,
-    },
-)
+        ], "columns": ALL_POSSIBLE_VALUES, "index": [True, False], "lineterminator": ["\n", "\r", "\r\n"], "chunksize": ALL_POSSIBLE_VALUES})
 def csv_writer_test_params(
     pdf, sep, header, na_rep, columns, index, lineterminator, chunksize
 ):

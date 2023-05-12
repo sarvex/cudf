@@ -25,15 +25,12 @@ logging.basicConfig(
 
 def _get_dtype_param_value(dtype_val):
     if dtype_val is not None and isinstance(dtype_val, abc.Mapping):
-        processed_dtypes = {}
-        for col_name, dtype in dtype_val.items():
-            if cudf.utils.dtypes.is_categorical_dtype(dtype):
-                processed_dtypes[col_name] = "category"
-            else:
-                processed_dtypes[col_name] = str(
-                    pandas_dtypes_to_np_dtypes.get(dtype, dtype)
-                )
-        return processed_dtypes
+        return {
+            col_name: "category"
+            if cudf.utils.dtypes.is_categorical_dtype(dtype)
+            else str(pandas_dtypes_to_np_dtypes.get(dtype, dtype))
+            for col_name, dtype in dtype_val.items()
+        }
     return dtype_val
 
 
@@ -100,7 +97,7 @@ class JSONReader(IOFuzz):
     def write_data(self, file_name):
         if self._current_buffer is not None:
             self._current_buffer.to_json(
-                file_name + "_crash_json.json", orient="records", lines=True
+                f"{file_name}_crash_json.json", orient="records", lines=True
             )
 
     def set_rand_params(self, params):
@@ -175,7 +172,7 @@ class JSONWriter(IOFuzz):
     def write_data(self, file_name):
         if self._current_buffer is not None:
             self._current_buffer.to_json(
-                file_name + "_crash_json.json", lines=True, orient="records"
+                f"{file_name}_crash_json.json", lines=True, orient="records"
             )
 
     def set_rand_params(self, params):

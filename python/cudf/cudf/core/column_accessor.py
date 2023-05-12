@@ -77,7 +77,7 @@ def _to_flat_dict(d):
     Convert the given nested dictionary to a flat dictionary
     with tuple keys.
     """
-    return {k: v for k, v in _to_flat_dict_inner(d)}
+    return dict(_to_flat_dict_inner(d))
 
 
 class ColumnAccessor(abc.MutableMapping):
@@ -112,8 +112,6 @@ class ColumnAccessor(abc.MutableMapping):
             multiindex = multiindex or data.multiindex
             level_names = level_names or data.level_names
             self._data = data._data
-            self.multiindex = multiindex
-            self._level_names = level_names
         else:
             # This code path is performance-critical for copies and should be
             # modified with care.
@@ -132,8 +130,9 @@ class ColumnAccessor(abc.MutableMapping):
                         raise ValueError("All columns must be of equal length")
                     self._data[k] = v
 
-            self.multiindex = multiindex
-            self._level_names = level_names
+
+        self._level_names = level_names
+        self.multiindex = multiindex
 
     @classmethod
     def _create_unsafe(
@@ -188,23 +187,15 @@ class ColumnAccessor(abc.MutableMapping):
     def nlevels(self) -> int:
         if len(self._data) == 0:
             return 0
-        if not self.multiindex:
-            return 1
-        else:
-            return len(next(iter(self.keys())))
+        return 1 if not self.multiindex else len(next(iter(self.keys())))
 
     @property
     def name(self) -> Any:
-        if len(self._data) == 0:
-            return None
-        return self.level_names[-1]
+        return None if len(self._data) == 0 else self.level_names[-1]
 
     @property
     def nrows(self) -> int:
-        if len(self._data) == 0:
-            return 0
-        else:
-            return len(next(iter(self.values())))
+        return 0 if len(self._data) == 0 else len(next(iter(self.values())))
 
     @cached_property
     def names(self) -> Tuple[Any, ...]:
@@ -349,9 +340,8 @@ class ColumnAccessor(abc.MutableMapping):
         elif pd.api.types.is_list_like(key) and not isinstance(key, tuple):
             return self._select_by_label_list_like(key)
         else:
-            if isinstance(key, tuple):
-                if any(isinstance(k, slice) for k in key):
-                    return self._select_by_label_with_wildcard(key)
+            if isinstance(key, tuple) and any(isinstance(k, slice) for k in key):
+                return self._select_by_label_with_wildcard(key)
             return self._select_by_label_grouped(key)
 
     def get_labels_by_index(self, index: Any) -> tuple:
@@ -421,7 +411,7 @@ class ColumnAccessor(abc.MutableMapping):
         # swap old keys for i and j
         for n, row in enumerate(self.names):
             new_keys[n][i], new_keys[n][j] = row[j], row[i]
-            new_dict.update({row: tuple(new_keys[n])})
+            new_dict[row] = tuple(new_keys[n])
 
         new_data = {new_dict[k]: v.copy(deep=True) for k, v in self.items()}
 
@@ -475,16 +465,15 @@ class ColumnAccessor(abc.MutableMapping):
         result = self._grouped_data[key]
         if isinstance(result, cudf.core.column.ColumnBase):
             return self.__class__({key: result})
-        else:
-            if self.multiindex:
-                result = _to_flat_dict(result)
-            if not isinstance(key, tuple):
-                key = (key,)
-            return self.__class__(
-                result,
-                multiindex=self.nlevels - len(key) > 1,
-                level_names=self.level_names[len(key) :],
-            )
+        if self.multiindex:
+            result = _to_flat_dict(result)
+        if not isinstance(key, tuple):
+            key = (key,)
+        return self.__class__(
+            result,
+            multiindex=self.nlevels - len(key) > 1,
+            level_names=self.level_names[len(key) :],
+        )
 
     def _select_by_label_slice(self, key: slice) -> ColumnAccessor:
         start, stop = key.start, key.stop
@@ -655,9 +644,7 @@ def _remove_key_level(key: Any, level: int) -> Any:
     single level remains, convert the tuple to a scalar.
     """
     result = key[:level] + key[level + 1 :]
-    if len(result) == 1:
-        return result[0]
-    return result
+    return result[0] if len(result) == 1 else result
 
 
 def _get_level(x, nlevels, level_names):
@@ -683,7 +670,7 @@ def _get_level(x, nlevels, level_names):
             raise IndexError(
                 f"Level {x} out of bounds. Index has {nlevels} levels."
             )
-        return x
     else:
         x = level_names.index(x)
-        return x
+
+    return x

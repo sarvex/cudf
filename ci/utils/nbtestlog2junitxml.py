@@ -85,15 +85,13 @@ def parseLog(logFile, testSuiteElement):
 
         testOutput = ""
 
-        for line in lf.readlines():
+        for line in lf:
             if parserState == parserStateEnum.newTest:
-                m = folderPatt.match(line)
-                if m:
+                if m := folderPatt.match(line):
                     setClassNameAttr(attrDict, m.group(1))
                     continue
 
-                m = skippingPatt.match(line)
-                if m:
+                if m := skippingPatt.match(line):
                     setTestNameAttr(attrDict, getFileBaseName(m.group(1)))
                     setTimeAttr(attrDict, "0m0s")
                     skippedElement = makeTestCaseElement(attrDict)
@@ -104,15 +102,12 @@ def parseLog(logFile, testSuiteElement):
                     incrNumAttr(testSuiteElement, "tests")
                     continue
 
-                m = startingPatt.match(line)
-                if m:
+                if m := startingPatt.match(line):
                     parserState = parserStateEnum.startingLine
                     testOutput = ""
                     setTestNameAttr(attrDict, m.group(1))
                     setTimeAttr(attrDict, "0m0s")
                     continue
-
-                continue
 
             elif parserState == parserStateEnum.startingLine:
                 if linePatt.match(line):
@@ -128,8 +123,7 @@ def parseLog(logFile, testSuiteElement):
                 continue
 
             elif parserState == parserStateEnum.exitCode:
-                m = exitCodePatt.match(line)
-                if m:
+                if m := exitCodePatt.match(line):
                     testCaseElement = makeTestCaseElement(attrDict)
                     if m.group(1) != "0":
                         failureElement = makeFailureElement(testOutput)
@@ -145,8 +139,7 @@ def parseLog(logFile, testSuiteElement):
                     incrNumAttr(testSuiteElement, "tests")
                     continue
 
-                m = timePatt.match(line)
-                if m:
+                if m := timePatt.match(line):
                     setTimeAttr(attrDict, m.group(1))
                     continue
 
@@ -160,4 +153,6 @@ if __name__ == "__main__":
     testSuiteElement = Element("testsuite", name="nbtest", hostname="")
     parseLog(sys.argv[1], testSuiteElement)
     testSuitesElement.append(testSuiteElement)
-    ElementTree(testSuitesElement).write(sys.argv[1]+".xml", xml_declaration=True)
+    ElementTree(testSuitesElement).write(
+        f"{sys.argv[1]}.xml", xml_declaration=True
+    )

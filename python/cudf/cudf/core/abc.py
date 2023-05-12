@@ -173,8 +173,7 @@ class Serializable:
             cudf.core.buffer.as_buffer(f) if c else f
             for c, f in zip(header["is-cuda"], map(memoryview, frames))
         ]
-        obj = cls.device_deserialize(header, frames)
-        return obj
+        return cls.device_deserialize(header, frames)
 
     def __reduce_ex__(self, protocol):
         header, frames = self.host_serialize()

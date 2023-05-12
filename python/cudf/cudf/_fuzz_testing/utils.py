@@ -88,7 +88,7 @@ def _generate_rand_meta(obj, dtypes_list, null_frequency_override=None):
         )
         # `cardinality` has to be at least 1.
         cardinality = max(1, obj._rand(obj._max_rows))
-        meta = dict()
+        meta = {}
         if dtype == "str":
             # We want to operate near the limits of string column
             # Hence creating a string column of size almost
@@ -222,9 +222,8 @@ def get_orc_dtype_info(dtype):
 def get_arrow_dtype_info_for_pyorc(dtype):
     if isinstance(dtype, pa.StructType):
         return get_orc_schema(df=None, arrow_table_schema=dtype)
-    else:
-        pd_dtype = cudf.dtype(dtype.to_pandas_dtype())
-        return get_orc_dtype_info(pd_dtype)
+    pd_dtype = cudf.dtype(dtype.to_pandas_dtype())
+    return get_orc_dtype_info(pd_dtype)
 
 
 def get_avro_schema(df):
@@ -232,8 +231,7 @@ def get_avro_schema(df):
         {"name": col_name, "type": get_avro_dtype_info(col_dtype)}
         for col_name, col_dtype in df.dtypes.items()
     ]
-    schema = {"type": "record", "name": "Root", "fields": fields}
-    return schema
+    return {"type": "record", "name": "Root", "fields": fields}
 
 
 def get_orc_schema(df, arrow_table_schema=None):
@@ -248,8 +246,7 @@ def get_orc_schema(df, arrow_table_schema=None):
             for field in arrow_table_schema
         )
 
-    schema = pyorc.Struct(**ordered_dict)
-    return schema
+    return pyorc.Struct(**ordered_dict)
 
 
 def convert_nulls_to_none(records, df):
@@ -267,13 +264,12 @@ def convert_nulls_to_none(records, df):
             if col in scalar_columns_convert:
                 if col in columns_with_nulls and value in (pd.NA, pd.NaT):
                     record[col] = None
+                elif isinstance(value, str):
+                    record[col] = value
+                elif isinstance(value, (pd.Timestamp, pd.Timedelta)):
+                    record[col] = int(value.value)
                 else:
-                    if isinstance(value, str):
-                        record[col] = value
-                    elif isinstance(value, (pd.Timestamp, pd.Timedelta)):
-                        record[col] = int(value.value)
-                    else:
-                        record[col] = value.item()
+                    record[col] = value.item()
 
     return records
 
@@ -294,10 +290,7 @@ def pandas_to_avro(df, file_name=None, file_io_obj=None):
 
 def _preprocess_to_orc_tuple(df, arrow_table_schema):
     def _null_to_None(value):
-        if value is pd.NA or value is pd.NaT:
-            return None
-        else:
-            return value
+        return None if value is pd.NA or value is pd.NaT else value
 
     def sanitize(value, struct_type):
         if value is None:
@@ -395,9 +388,5 @@ def compare_dataframe(left, right, nullable=True):
     if nullable and isinstance(right, cudf.DataFrame):
         right = right.to_pandas(nullable=True)
 
-    if len(left.index) == 0 and len(right.index) == 0:
-        check_index_type = False
-    else:
-        check_index_type = True
-
+    check_index_type = len(left.index) != 0 or len(right.index) != 0
     return assert_eq(left, right, check_index_type=check_index_type)
